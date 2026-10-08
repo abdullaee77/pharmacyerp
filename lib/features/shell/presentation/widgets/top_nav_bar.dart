@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../authentication/domain/user.dart';
 import '../../domain/navigation_item.dart';
@@ -28,95 +29,127 @@ class TopNavBar extends StatelessWidget {
         .toList();
 
     return Container(
-      height: 50,
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        border: const Border(bottom: BorderSide(color: AppColors.border, width: 1)),
+        border: const Border(
+          bottom: BorderSide(color: AppColors.border, width: 1),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 4,
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SizedBox(width: 12),
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const ClampingScrollPhysics(),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: visibleItems.map((item) {
-                  final isSelected = selectedItem == item;
-                  return _NavTabButton(
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const ClampingScrollPhysics(),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final item in visibleItems)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: _NavButton(
                     item: item,
-                    isSelected: isSelected,
+                    isSelected: selectedItem == item,
                     onTap: () => onItemSelected(item.index),
-                  );
-                }).toList(),
-              ),
-            ),
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(width: 12),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _NavTabButton extends StatelessWidget {
+class _NavButton extends StatefulWidget {
   final NavigationItem item;
   final bool isSelected;
   final VoidCallback onTap;
 
-  const _NavTabButton({
+  const _NavButton({
     required this.item,
     required this.isSelected,
     required this.onTap,
   });
 
   @override
+  State<_NavButton> createState() => _NavButtonState();
+}
+
+class _NavButtonState extends State<_NavButton> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
-          hoverColor: AppColors.surfaceVariant,
+    final selected = widget.isSelected;
+
+    final Color bg = selected
+        ? AppColors.primary
+        : _hovered
+        ? AppColors.surfaceVariant
+        : Colors.transparent;
+
+    final Color fg = selected ? AppColors.textInverse : AppColors.textSecondary;
+
+    return Tooltip(
+      message: '${widget.item.label} (${widget.item.shortcutLabel})',
+      waitDuration: const Duration(milliseconds: 600),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          behavior: HitTestBehavior.opaque,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            height: 38,
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            alignment: Alignment.center,
             decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: isSelected ? AppColors.primary : Colors.transparent,
-                  width: 3.5,
-                ),
+              color: bg,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              border: Border.all(
+                color: selected
+                    ? AppColors.primaryDark
+                    : _hovered
+                    ? AppColors.border
+                    : Colors.transparent,
+                width: 1,
               ),
+              boxShadow: selected
+                  ? [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.35),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ]
+                  : const [],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Icon(
-                  isSelected ? item.selectedIcon : item.icon,
+                  selected ? widget.item.selectedIcon : widget.item.icon,
                   size: 18,
-                  color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                  color: fg,
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  item.label,
+                  widget.item.label,
                   style: AppTypography.buttonSmall.copyWith(
                     fontSize: 13.5,
-                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                    color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: fg,
                   ),
                 ),
               ],
