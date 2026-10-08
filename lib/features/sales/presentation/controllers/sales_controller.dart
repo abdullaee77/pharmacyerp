@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:pharmacy/core/services/app_event_bus.dart'; // Import Event Bus
+import 'package:pharmacy/core/services/app_event_bus.dart';
 import '../../../customers/domain/customer_repository.dart';
 import '../../../inventory/domain/inventory_repository.dart';
 import '../../application/complete_sale_use_case.dart';
@@ -54,7 +54,6 @@ class SalesController extends ChangeNotifier {
     return result.fold(
       onSuccess: (_) {
         loadHistory();
-        // ── Fire sale event to update dashboard and customer ledgers instantly ──
         AppEventBus.instance.fire(AppEvent.saleCompleted);
         return null;
       },
@@ -62,10 +61,12 @@ class SalesController extends ChangeNotifier {
     );
   }
 
-  Future<void> loadHistory() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadHistory({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final result = await _getHistory.execute(
       searchQuery: _searchQuery.isEmpty ? null : _searchQuery,
@@ -74,6 +75,7 @@ class SalesController extends ChangeNotifier {
     result.fold(
       onSuccess: (data) {
         _history = data;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },
@@ -101,7 +103,6 @@ class SalesController extends ChangeNotifier {
     return result.fold(
       onSuccess: (_) {
         loadHistory();
-        // ── Fire sale event on returns too since balance and profits decrease ──
         AppEventBus.instance.fire(AppEvent.saleCompleted);
         return null;
       },

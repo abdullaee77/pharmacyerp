@@ -4,9 +4,11 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
 import '../../../authentication/presentation/controllers/auth_controller.dart';
 import '../../../inventory/presentation/controllers/batch_controller.dart';
 import '../../../inventory/presentation/screens/batch_list_screen.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/purchase.dart';
 import '../controllers/purchase_controller.dart';
 import '../widgets/purchase_form_dialog.dart';
@@ -47,6 +49,12 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
     _tabController.dispose();
     super.dispose();
   }
+
+  bool get _canAdd => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.purchases, PermissionAction.add);
+
+  bool get _canReturn => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.purchases, PermissionAction.returnAction);
 
   Future<void> _openReceiveForm() async {
     final error = await showDialog<String>(
@@ -112,12 +120,13 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
                   ],
                 ),
                 const Spacer(),
-                AppButton(
-                  label: 'Receive Purchase',
-                  icon: Icons.add_rounded,
-                  variant: AppButtonVariant.primary,
-                  onPressed: _openReceiveForm,
-                ),
+                if (_canAdd)
+                  AppButton(
+                    label: 'Receive Purchase',
+                    icon: Icons.add_rounded,
+                    variant: AppButtonVariant.primary,
+                    onPressed: _openReceiveForm,
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -138,7 +147,10 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
                 controller: _tabController,
                 children: [
                   _buildProcurementTab(ctrl),
-                  BatchListScreen(controller: widget.batchController),
+                  BatchListScreen(
+                    controller: widget.batchController,
+                    authController: widget.authController,
+                  ),
                 ],
               ),
             ),
@@ -164,8 +176,9 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
   }
 
   Widget _buildTable(PurchaseController ctrl) {
-    if (ctrl.isLoading)
+    if (ctrl.isLoading) {
       return const AppLoading(message: 'Loading procurement files...');
+    }
     if (ctrl.error != null) {
       return AppEmptyState(
         icon: Icons.error_outline_rounded,
@@ -254,7 +267,8 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
                     ),
                   ),
                   DataCell(
-                    AppButton(
+                    _canReturn
+                        ? AppButton(
                       label: 'Supplier Return',
                       icon: Icons.assignment_return_outlined,
                       variant: AppButtonVariant.outlined,
@@ -262,7 +276,8 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
                       onPressed: p.status == PurchaseStatus.returned
                           ? null
                           : () => _openReturn(p),
-                    ),
+                    )
+                        : const SizedBox.shrink(),
                   ),
                 ],
               );

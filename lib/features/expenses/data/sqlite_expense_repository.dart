@@ -116,25 +116,54 @@ class SqliteExpenseRepository implements ExpenseRepository {
     }
   }
 
+  // ─── ATOMIC EXPENSE CREATION ─────────────────────────────────
+
   @override
   Future<Result<Expense>> createExpense(Expense e) async {
     try {
       final db = await _db;
-      await db.insert('expenses', {
-        'id': e.id.value,
-        'category': e.category,
-        'description': e.description,
-        'amount': e.amount.paisa,
-        'payment_method': e.paymentMethod,
-        'account_id': e.accountId,
-        'reference': e.reference,
-        'operator_name': e.operatorName,
-        'expense_date': e.expenseDate.toIso8601String(),
-        'created_at': e.createdAt.toIso8601String(),
+
+      await db.transaction((txn) async {
+        // Idempotency guard
+        final existing = await txn.rawQuery(
+          'SELECT 1 FROM expenses WHERE id = ? LIMIT 1',
+          [e.id.value],
+        );
+        if (existing.isNotEmpty) return;
+
+        // 1. Insert expense record
+        await txn.insert('expenses', {
+          'id': e.id.value,
+          'category': e.category,
+          'description': e.description,
+          'amount': e.amount.paisa,
+          'payment_method': e.paymentMethod,
+          'account_id': e.accountId,
+          'reference': e.reference,
+          'operator_name': e.operatorName,
+          'expense_date': e.expenseDate.toIso8601String(),
+          'created_at': e.createdAt.toIso8601String(),
+        });
+
+        // 2. Debit the linked cash/bank account (money leaving)
+        if (e.accountId != null && e.accountId!.isNotEmpty) {
+          await txn.insert('financial_transactions', {
+            'id': 'ft_exp_${e.id.value}',
+            'account_id': e.accountId,
+            'source': 'expense',
+            'description': '${e.category}: ${e.description}',
+            'reference': e.id.value,
+            'debit': 0,
+            'credit': e.amount.paisa,
+            'operator_name': e.operatorName,
+            'created_at': e.createdAt.toIso8601String(),
+          });
+        }
       });
+
       return Success(e);
     } catch (err) {
-      return Failure(DatabaseFailure(message: 'Failed to save expense: $err'));
+      return Failure(DatabaseFailure(message: 'Atomic expense creation failed: $err'));
     }
   }
 

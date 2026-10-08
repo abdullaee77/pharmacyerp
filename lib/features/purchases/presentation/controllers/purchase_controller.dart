@@ -41,16 +41,19 @@ class PurchaseController extends ChangeNotifier {
   String? get error => _error;
   String get searchQuery => _searchQuery;
 
-  Future<void> loadPurchases() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadPurchases({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final result = await _getPurchases.execute(
         searchQuery: _searchQuery.isEmpty ? null : _searchQuery);
     result.fold(
       onSuccess: (data) {
         _purchases = data;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },

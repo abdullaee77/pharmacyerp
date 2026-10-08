@@ -29,10 +29,12 @@ class AccountController extends ChangeNotifier {
   String? get error => _error;
   List<FinancialTransactionRow> get activeLedger => _activeLedger;
 
-  Future<void> loadAccounts() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadAccounts({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final result = await _getAccounts.execute(
       searchQuery: _searchQuery.isEmpty ? null : _searchQuery,
@@ -41,6 +43,7 @@ class AccountController extends ChangeNotifier {
     result.fold(
       onSuccess: (data) {
         _accounts = data;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },

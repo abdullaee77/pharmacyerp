@@ -16,7 +16,7 @@ class CustomerController extends ChangeNotifier {
   final RecordCustomerPaymentUseCase _recordPayment;
 
   StreamSubscription<AppEvent>? _eventSubscription;
-  CustomerId? _activeCustomerId; // Tracks active customer to refresh ledger dynamically
+  CustomerId? _activeCustomerId;
 
   CustomerController({required CustomerRepository repository})
       : _getCustomers = GetCustomersUseCase(repository),
@@ -25,12 +25,9 @@ class CustomerController extends ChangeNotifier {
         _deleteCustomer = DeleteCustomerUseCase(repository),
         _getLedger = GetCustomerLedgerUseCase(repository),
         _recordPayment = RecordCustomerPaymentUseCase(repository) {
-
-    // ── Listen to Event Bus for Automatic Updates ──
     _eventSubscription = AppEventBus.instance.stream.listen((event) {
       if (event == AppEvent.saleCompleted || event == AppEvent.customerUpdated) {
-        loadCustomers();
-        // If viewing a ledger, auto-update it with the new sales record
+        loadCustomers(silent: true);
         if (_activeCustomerId != null) {
           _reloadActiveLedger();
         }
@@ -50,10 +47,14 @@ class CustomerController extends ChangeNotifier {
   List<LedgerRow> get activeLedger => _activeLedger;
   CustomerId? get activeCustomerId => _activeCustomerId;
 
-  Future<void> loadCustomers() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  /// When [silent] is true the loading spinner is suppressed so a background
+  /// refresh does not flash the UI.  Search text is always preserved.
+  Future<void> loadCustomers({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final result = await _getCustomers.execute(
       searchQuery: _searchQuery.isEmpty ? null : _searchQuery,
@@ -62,6 +63,7 @@ class CustomerController extends ChangeNotifier {
     result.fold(
       onSuccess: (data) {
         _customers = data;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },
@@ -122,7 +124,6 @@ class CustomerController extends ChangeNotifier {
     await _reloadActiveLedger();
   }
 
-  // Reloads active ledger without resetting the tracking target ID
   Future<void> _reloadActiveLedger() async {
     if (_activeCustomerId == null) return;
     final result = await _getLedger.execute(_activeCustomerId!);
@@ -165,7 +166,7 @@ class CustomerController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _eventSubscription?.cancel(); // Cancel subscription to prevent memory leaks
+    _eventSubscription?.cancel();
     super.dispose();
   }
 }

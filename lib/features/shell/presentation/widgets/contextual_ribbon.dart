@@ -3,30 +3,38 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../authentication/domain/user.dart';
 import '../../domain/navigation_item.dart';
 import '../../domain/ribbon_action.dart';
 
-/// Contextual Ribbon Bar: Collapsible, action-oriented desktop command toolbar.
 class ContextualRibbon extends StatelessWidget {
   final NavigationItem currentItem;
   final bool isCollapsed;
   final ValueChanged<String> onAction;
+  final User? user;
 
   const ContextualRibbon({
     super.key,
     required this.currentItem,
     required this.isCollapsed,
     required this.onAction,
+    this.user,
   });
 
   @override
   Widget build(BuildContext context) {
-    final actions = RibbonAction.getActionsFor(currentItem);
+    final allActions = RibbonAction.getActionsFor(currentItem);
+    // Filter: keep only actions the user is allowed to perform.
+    final actions = allActions.where((a) {
+      if (a.requiredPermission == null) return true;
+      return PermissionGate.allow(user, a.requiredPermission!.category, a.requiredPermission!.action);
+    }).toList();
 
     return AnimatedSize(
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeInOutCubic,
-      child: isCollapsed
+      child: isCollapsed || actions.isEmpty
           ? const SizedBox.shrink()
           : Container(
         height: 50,
@@ -42,7 +50,6 @@ class ContextualRibbon extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Module Context Badge
             Container(
               padding: const EdgeInsets.symmetric(
                 horizontal: AppSpacing.sm,
@@ -56,11 +63,7 @@ class ContextualRibbon extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    currentItem.selectedIcon,
-                    size: 14,
-                    color: AppColors.primary,
-                  ),
+                  Icon(currentItem.selectedIcon, size: 14, color: AppColors.primary),
                   const SizedBox(width: 6),
                   Text(
                     currentItem.label.toUpperCase(),
@@ -73,16 +76,9 @@ class ContextualRibbon extends StatelessWidget {
                 ],
               ),
             ),
-
             const SizedBox(width: AppSpacing.md),
-            Container(
-              width: 1,
-              height: 24,
-              color: AppColors.borderDark,
-            ),
+            Container(width: 1, height: 24, color: AppColors.borderDark),
             const SizedBox(width: AppSpacing.md),
-
-            // Action Buttons List
             Expanded(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -108,10 +104,7 @@ class _RibbonActionButton extends StatelessWidget {
   final RibbonAction action;
   final VoidCallback onTap;
 
-  const _RibbonActionButton({
-    required this.action,
-    required this.onTap,
-  });
+  const _RibbonActionButton({required this.action, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -126,9 +119,7 @@ class _RibbonActionButton extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             borderRadius: BorderRadius.circular(AppRadius.sm),
-            hoverColor: action.isPrimary
-                ? AppColors.primaryDark
-                : AppColors.surfaceHover,
+            hoverColor: action.isPrimary ? AppColors.primaryDark : AppColors.surfaceHover,
             child: Container(
               height: 34,
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
@@ -136,77 +127,48 @@ class _RibbonActionButton extends StatelessWidget {
                 color: action.isPrimary ? AppColors.primary : AppColors.surface,
                 borderRadius: BorderRadius.circular(AppRadius.sm),
                 border: Border.all(
-                  color: action.isPrimary
-                      ? AppColors.primaryDark
-                      : AppColors.border,
+                  color: action.isPrimary ? AppColors.primaryDark : AppColors.border,
                   width: 1,
                 ),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    action.icon,
-                    size: 16,
-                    color: action.isPrimary
-                        ? AppColors.textInverse
-                        : AppColors.textPrimary,
-                  ),
+                  Icon(action.icon, size: 16,
+                      color: action.isPrimary ? AppColors.textInverse : AppColors.textPrimary),
                   const SizedBox(width: AppSpacing.sm),
-                  Text(
-                    action.label,
-                    style: AppTypography.buttonSmall.copyWith(
-                      color: action.isPrimary
-                          ? AppColors.textInverse
-                          : AppColors.textPrimary,
-                      fontWeight:
-                      action.isPrimary ? FontWeight.w600 : FontWeight.w500,
-                    ),
-                  ),
+                  Text(action.label,
+                      style: AppTypography.buttonSmall.copyWith(
+                        color: action.isPrimary ? AppColors.textInverse : AppColors.textPrimary,
+                        fontWeight: action.isPrimary ? FontWeight.w600 : FontWeight.w500,
+                      )),
                   if (action.shortcut != null) ...[
                     const SizedBox(width: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 1,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                       decoration: BoxDecoration(
-                        color: action.isPrimary
-                            ? AppColors.primaryDark
-                            : AppColors.surfaceVariant,
+                        color: action.isPrimary ? AppColors.primaryDark : AppColors.surfaceVariant,
                         borderRadius: BorderRadius.circular(AppRadius.xs),
                       ),
-                      child: Text(
-                        action.shortcut!,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: action.isPrimary
-                              ? AppColors.textInverse
-                              : AppColors.textSecondary,
-                        ),
-                      ),
+                      child: Text(action.shortcut!,
+                          style: TextStyle(
+                            fontSize: 10, fontWeight: FontWeight.w600,
+                            color: action.isPrimary ? AppColors.textInverse : AppColors.textSecondary,
+                          )),
                     ),
                   ],
                   if (action.badgeText != null) ...[
                     const SizedBox(width: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 1,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                       decoration: BoxDecoration(
                         color: AppColors.warning,
                         borderRadius: BorderRadius.circular(AppRadius.full),
                       ),
-                      child: Text(
-                        action.badgeText!,
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textInverse,
-                        ),
-                      ),
+                      child: Text(action.badgeText!,
+                          style: const TextStyle(
+                            fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textInverse,
+                          )),
                     ),
                   ],
                 ],

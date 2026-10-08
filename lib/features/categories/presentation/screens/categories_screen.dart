@@ -4,6 +4,9 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../authentication/presentation/controllers/auth_controller.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/category.dart';
 import '../../domain/manufacturer.dart';
 import '../controllers/category_controller.dart';
@@ -11,8 +14,13 @@ import '../controllers/category_controller.dart';
 /// Categories & Manufacturers master data management workspace.
 class CategoriesScreen extends StatefulWidget {
   final CategoryController controller;
+  final AuthController authController;
 
-  const CategoriesScreen({super.key, required this.controller});
+  const CategoriesScreen({
+    super.key,
+    required this.controller,
+    required this.authController,
+  });
 
   @override
   State<CategoriesScreen> createState() => _CategoriesScreenState();
@@ -36,6 +44,10 @@ class _CategoriesScreenState extends State<CategoriesScreen>
     _tabController.dispose();
     super.dispose();
   }
+
+  // Per your mapping, categories/manufacturers are managed via medicines.manage.
+  bool get _canManage => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.medicines, PermissionAction.manage);
 
   Future<void> _addEditCategory({Category? existing}) async {
     final nameCtrl = TextEditingController(text: existing?.name ?? '');
@@ -181,11 +193,8 @@ class _CategoriesScreenState extends State<CategoriesScreen>
           children: [
             Row(
               children: [
-                const Icon(
-                  Icons.category_rounded,
-                  color: AppColors.primary,
-                  size: 28,
-                ),
+                const Icon(Icons.category_rounded,
+                    color: AppColors.primary, size: 28),
                 const SizedBox(width: AppSpacing.md),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -241,12 +250,13 @@ class _CategoriesScreenState extends State<CategoriesScreen>
               style: AppTypography.subtitle,
             ),
             const Spacer(),
-            AppButton(
-              label: 'Add Category',
-              icon: Icons.add_rounded,
-              variant: AppButtonVariant.primary,
-              onPressed: () => _addEditCategory(),
-            ),
+            if (_canManage)
+              AppButton(
+                label: 'Add Category',
+                icon: Icons.add_rounded,
+                variant: AppButtonVariant.primary,
+                onPressed: () => _addEditCategory(),
+              ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
@@ -255,81 +265,91 @@ class _CategoriesScreenState extends State<CategoriesScreen>
               ? const AppLoading()
               : ctrl.categories.isEmpty
               ? AppEmptyState(
-                  icon: Icons.category_outlined,
-                  title: 'No categories added',
-                  subtitle: 'Create your first category to classify medicines.',
-                  actionLabel: 'Add Category',
-                  onAction: () => _addEditCategory(),
-                )
+            icon: Icons.category_outlined,
+            title: 'No categories added',
+            subtitle:
+            'Create your first category to classify medicines.',
+            actionLabel: _canManage ? 'Add Category' : null,
+            onAction: _canManage ? () => _addEditCategory() : null,
+          )
               : Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(AppRadius.lg),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadius.lg),
-                    child: ListView.separated(
-                      itemCount: ctrl.categories.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (ctx, i) {
-                        final c = ctrl.categories[i];
-                        return ListTile(
-                          leading: const Icon(
-                            Icons.label_outline_rounded,
-                            color: AppColors.primary,
-                          ),
-                          title: Text(
-                            c.name,
-                            style: AppTypography.subtitle.copyWith(
-                              fontSize: 14,
-                            ),
-                          ),
-                          subtitle: c.description.isEmpty
-                              ? null
-                              : Text(
-                                  c.description,
-                                  style: AppTypography.caption,
-                                ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined, size: 16),
-                                splashRadius: 16,
-                                onPressed: () => _addEditCategory(existing: c),
-                              ),
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.delete_outline,
-                                  size: 16,
-                                  color: AppColors.error,
-                                ),
-                                splashRadius: 16,
-                                onPressed: () async {
-                                  final ok = await AppDialog.warning(
-                                    context,
-                                    title: 'Delete Category?',
-                                    message: '"${c.name}" will be removed.',
-                                    confirmLabel: 'Delete',
-                                  );
-                                  if (ok && mounted) {
-                                    final err = await widget.controller
-                                        .deleteCategory(c.id);
-                                    if (mounted && err != null)
-                                      AppToast.error(context, err);
-                                    else if (mounted)
-                                      AppToast.success(context, 'Deleted.');
-                                  }
-                                },
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              child: ListView.separated(
+                itemCount: ctrl.categories.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (ctx, i) {
+                  final c = ctrl.categories[i];
+                  return ListTile(
+                    leading: const Icon(
+                      Icons.label_outline_rounded,
+                      color: AppColors.primary,
                     ),
-                  ),
-                ),
+                    title: Text(
+                      c.name,
+                      style: AppTypography.subtitle.copyWith(
+                        fontSize: 14,
+                      ),
+                    ),
+                    subtitle: c.description.isEmpty
+                        ? null
+                        : Text(
+                      c.description,
+                      style: AppTypography.caption,
+                    ),
+                    trailing: _canManage
+                        ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined,
+                              size: 16),
+                          splashRadius: 16,
+                          onPressed: () =>
+                              _addEditCategory(existing: c),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            size: 16,
+                            color: AppColors.error,
+                          ),
+                          splashRadius: 16,
+                          onPressed: () async {
+                            final ok =
+                            await AppDialog.warning(
+                              context,
+                              title: 'Delete Category?',
+                              message:
+                              '"${c.name}" will be removed.',
+                              confirmLabel: 'Delete',
+                            );
+                            if (ok && mounted) {
+                              final err = await widget
+                                  .controller
+                                  .deleteCategory(c.id);
+                              if (mounted && err != null) {
+                                AppToast.error(context, err);
+                              } else if (mounted) {
+                                AppToast.success(
+                                    context, 'Deleted.');
+                              }
+                            }
+                          },
+                        ),
+                      ],
+                    )
+                        : null,
+                  );
+                },
+              ),
+            ),
+          ),
         ),
       ],
     );
@@ -346,12 +366,13 @@ class _CategoriesScreenState extends State<CategoriesScreen>
               style: AppTypography.subtitle,
             ),
             const Spacer(),
-            AppButton(
-              label: 'Add Manufacturer',
-              icon: Icons.add_rounded,
-              variant: AppButtonVariant.primary,
-              onPressed: () => _addEditManufacturer(),
-            ),
+            if (_canManage)
+              AppButton(
+                label: 'Add Manufacturer',
+                icon: Icons.add_rounded,
+                variant: AppButtonVariant.primary,
+                onPressed: () => _addEditManufacturer(),
+              ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
@@ -360,88 +381,98 @@ class _CategoriesScreenState extends State<CategoriesScreen>
               ? const AppLoading()
               : ctrl.manufacturers.isEmpty
               ? AppEmptyState(
-                  icon: Icons.business_outlined,
-                  title: 'No manufacturers added',
-                  subtitle: 'Create your first manufacturer entry.',
-                  actionLabel: 'Add Manufacturer',
-                  onAction: () => _addEditManufacturer(),
-                )
+            icon: Icons.business_outlined,
+            title: 'No manufacturers added',
+            subtitle: 'Create your first manufacturer entry.',
+            actionLabel: _canManage ? 'Add Manufacturer' : null,
+            onAction:
+            _canManage ? () => _addEditManufacturer() : null,
+          )
               : Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(AppRadius.lg),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadius.lg),
-                    child: ListView.separated(
-                      itemCount: ctrl.manufacturers.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (ctx, i) {
-                        final m = ctrl.manufacturers[i];
-                        return ListTile(
-                          leading: const Icon(
-                            Icons.business_rounded,
-                            color: AppColors.primary,
-                          ),
-                          title: Text(
-                            m.name,
-                            style: AppTypography.subtitle.copyWith(
-                              fontSize: 14,
-                            ),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (m.contact.isNotEmpty)
-                                Text(
-                                  'Contact: ${m.contact}',
-                                  style: AppTypography.caption,
-                                ),
-                              if (m.address.isNotEmpty)
-                                Text(m.address, style: AppTypography.caption),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined, size: 16),
-                                splashRadius: 16,
-                                onPressed: () =>
-                                    _addEditManufacturer(existing: m),
-                              ),
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.delete_outline,
-                                  size: 16,
-                                  color: AppColors.error,
-                                ),
-                                splashRadius: 16,
-                                onPressed: () async {
-                                  final ok = await AppDialog.warning(
-                                    context,
-                                    title: 'Delete Manufacturer?',
-                                    message: '"${m.name}" will be removed.',
-                                    confirmLabel: 'Delete',
-                                  );
-                                  if (ok && mounted) {
-                                    final err = await widget.controller
-                                        .deleteManufacturer(m.id);
-                                    if (mounted && err != null)
-                                      AppToast.error(context, err);
-                                    else if (mounted)
-                                      AppToast.success(context, 'Deleted.');
-                                  }
-                                },
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              child: ListView.separated(
+                itemCount: ctrl.manufacturers.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (ctx, i) {
+                  final m = ctrl.manufacturers[i];
+                  return ListTile(
+                    leading: const Icon(
+                      Icons.business_rounded,
+                      color: AppColors.primary,
                     ),
-                  ),
-                ),
+                    title: Text(
+                      m.name,
+                      style: AppTypography.subtitle.copyWith(
+                        fontSize: 14,
+                      ),
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (m.contact.isNotEmpty)
+                          Text(
+                            'Contact: ${m.contact}',
+                            style: AppTypography.caption,
+                          ),
+                        if (m.address.isNotEmpty)
+                          Text(m.address,
+                              style: AppTypography.caption),
+                      ],
+                    ),
+                    trailing: _canManage
+                        ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined,
+                              size: 16),
+                          splashRadius: 16,
+                          onPressed: () =>
+                              _addEditManufacturer(existing: m),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            size: 16,
+                            color: AppColors.error,
+                          ),
+                          splashRadius: 16,
+                          onPressed: () async {
+                            final ok =
+                            await AppDialog.warning(
+                              context,
+                              title: 'Delete Manufacturer?',
+                              message:
+                              '"${m.name}" will be removed.',
+                              confirmLabel: 'Delete',
+                            );
+                            if (ok && mounted) {
+                              final err = await widget
+                                  .controller
+                                  .deleteManufacturer(m.id);
+                              if (mounted && err != null) {
+                                AppToast.error(context, err);
+                              } else if (mounted) {
+                                AppToast.success(
+                                    context, 'Deleted.');
+                              }
+                            }
+                          },
+                        ),
+                      ],
+                    )
+                        : null,
+                  );
+                },
+              ),
+            ),
+          ),
         ),
       ],
     );

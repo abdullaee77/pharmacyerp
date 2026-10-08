@@ -7,9 +7,11 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
 import '../../../authentication/presentation/controllers/auth_controller.dart';
 import '../../../inventory/domain/batch.dart';
 import '../../../medicines/domain/value_objects.dart';
+import '../../../users/domain/role.dart';
 import '../controllers/pos_cart_controller.dart';
 import '../controllers/sales_controller.dart';
 import 'package:pharmacy/features/sales/domain/pos_models.dart';
@@ -40,7 +42,7 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
   final TextEditingController _searchTextController = TextEditingController();
 
   @override
-  bool get wantKeepAlive => true; // Keeps POS state & shortcut listeners active
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -60,6 +62,12 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
     super.dispose();
   }
 
+  bool get _canAddSale => PermissionGate.allow(
+    widget.authController.currentUser,
+    PermissionCategory.sales,
+    PermissionAction.add,
+  );
+
   bool _handleGlobalKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     if (!mounted) return false;
@@ -70,7 +78,7 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
   bool _processKey(LogicalKeyboardKey logical, PhysicalKeyboardKey physical) {
     final String label = logical.keyLabel.trim().toUpperCase();
 
-    // ── 1. Search Medicine: STRICT F2 ONLY ──
+    // 1. Search Medicine: F2
     if (logical == LogicalKeyboardKey.f2 ||
         physical == PhysicalKeyboardKey.f2 ||
         label == 'F2') {
@@ -78,23 +86,27 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
       return true;
     }
 
-    // ── 2. Complete Sale / Pay: STRICT F8 ONLY ──
+    // 2. Complete Sale / Pay: F8
     if (logical == LogicalKeyboardKey.f8 ||
         physical == PhysicalKeyboardKey.f8 ||
         label == 'F8') {
-      triggerPay();
+      if (_canAddSale) {
+        triggerPay();
+      }
       return true;
     }
 
-    // ── 3. Hold / Resume Sale: STRICT F9 ONLY ──
+    // 3. Hold / Resume Sale: F9
     if (logical == LogicalKeyboardKey.f9 ||
         physical == PhysicalKeyboardKey.f9 ||
         label == 'F9') {
-      triggerHold();
+      if (_canAddSale) {
+        triggerHold();
+      }
       return true;
     }
 
-    // ── 4. Escape: Clear Search Focus ──
+    // 4. Escape: Clear Search Focus
     if (logical == LogicalKeyboardKey.escape ||
         physical == PhysicalKeyboardKey.escape) {
       if (_searchFocusNode.hasFocus) {
@@ -117,6 +129,7 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
   }
 
   void triggerPay() {
+    if (!_canAddSale) return;
     if (widget.controller.isEmpty) {
       AppToast.info(context, 'Cart is empty. Add medicines before proceeding to payment.');
       return;
@@ -125,10 +138,12 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
   }
 
   void triggerHold() {
+    if (!_canAddSale) return;
     _onHold();
   }
 
   Future<void> _handleMedicineSelected(PosSearchResult result) async {
+    if (!_canAddSale) return;
     final medicine = result.medicine;
 
     try {
@@ -188,6 +203,7 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
           cartController: widget.controller,
           salesController: widget.salesController,
           operatorName: widget.authController.currentUser?.fullName ?? 'Operator',
+          user: widget.authController.currentUser,
         ),
       );
 
@@ -247,7 +263,7 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
     super.build(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9), // Slate off-white background for high element contrast
+      backgroundColor: const Color(0xFFF1F5F9),
       body: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, _) {
@@ -261,15 +277,13 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
             child: LayoutBuilder(
               builder: (context, constraints) {
                 return Padding(
-                  padding: const EdgeInsets.all(AppSpacing.md), // Keeps UI off screen edges
+                  padding: const EdgeInsets.all(AppSpacing.md),
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      // Layer 1: Layout Flow
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Header Section
                           Row(
                             children: [
                               const Icon(Icons.point_of_sale_rounded, color: AppColors.primary, size: 28),
@@ -284,21 +298,18 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
                               const Spacer(),
                               _ShortcutHints(
                                 onF2Pressed: focusSearch,
-                                onF8Pressed: triggerPay,
-                                onF9Pressed: triggerHold,
+                                onF8Pressed: _canAddSale ? triggerPay : null,
+                                onF9Pressed: _canAddSale ? triggerHold : null,
                               ),
                             ],
                           ),
                           const SizedBox(height: AppSpacing.md),
-
-                          // Structural Layout Space for lowered Search Bar (increased spacing)
                           const SizedBox(height: 96),
 
-                          // Middle: Prominent, separated Cart Table Card
                           Expanded(
                             child: Container(
                               decoration: BoxDecoration(
-                                color: AppColors.surface, // Clean pure white card
+                                color: AppColors.surface,
                                 borderRadius: BorderRadius.circular(AppRadius.lg),
                                 border: Border.all(color: const Color(0xFFE2E8F0)),
                                 boxShadow: [
@@ -314,12 +325,11 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
                             ),
                           ),
 
-                          // Bottom: Prominent, separated Summary & Actions Bar Card
                           Container(
                             margin: const EdgeInsets.only(top: AppSpacing.lg),
                             padding: const EdgeInsets.all(AppSpacing.md),
                             decoration: BoxDecoration(
-                              color: AppColors.surface, // Clean pure white card
+                              color: AppColors.surface,
                               borderRadius: BorderRadius.circular(AppRadius.lg),
                               border: Border.all(color: const Color(0xFFE2E8F0)),
                               boxShadow: [
@@ -366,58 +376,58 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
                                 else
                                   const Spacer(),
 
-                                AppButton(
-                                  label: 'Clear',
-                                  variant: AppButtonVariant.ghost,
-                                  onPressed: widget.controller.isEmpty ? null : _onClear,
-                                ),
-                                const SizedBox(width: AppSpacing.sm),
+                                if (_canAddSale) ...[
+                                  AppButton(
+                                    label: 'Clear',
+                                    variant: AppButtonVariant.ghost,
+                                    onPressed: widget.controller.isEmpty ? null : _onClear,
+                                  ),
+                                  const SizedBox(width: AppSpacing.sm),
 
-                                // Hold button with count badge
-                                Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    AppButton(
-                                      label: 'Hold (F9)',
-                                      variant: AppButtonVariant.outlined,
-                                      onPressed: triggerHold,
-                                    ),
-                                    if (widget.controller.heldSalesCount > 0)
-                                      Positioned(
-                                        top: -6,
-                                        right: -6,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFFF59E0B),
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(color: Colors.white, width: 1.5),
-                                          ),
-                                          child: Text(
-                                            '${widget.controller.heldSalesCount}',
-                                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                  Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      AppButton(
+                                        label: 'Hold (F9)',
+                                        variant: AppButtonVariant.outlined,
+                                        onPressed: triggerHold,
+                                      ),
+                                      if (widget.controller.heldSalesCount > 0)
+                                        Positioned(
+                                          top: -6,
+                                          right: -6,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFF59E0B),
+                                              borderRadius: BorderRadius.circular(10),
+                                              border: Border.all(color: Colors.white, width: 1.5),
+                                            ),
+                                            child: Text(
+                                              '${widget.controller.heldSalesCount}',
+                                              style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                  ],
-                                ),
+                                    ],
+                                  ),
 
-                                const SizedBox(width: AppSpacing.sm),
-                                AppButton(
-                                  label: 'Complete Sale (F8)',
-                                  icon: Icons.payments_rounded,
-                                  variant: AppButtonVariant.primary,
-                                  onPressed: triggerPay,
-                                ),
+                                  const SizedBox(width: AppSpacing.sm),
+                                  AppButton(
+                                    label: 'Complete Sale (F8)',
+                                    icon: Icons.payments_rounded,
+                                    variant: AppButtonVariant.primary,
+                                    onPressed: triggerPay,
+                                  ),
+                                ],
                               ],
                             ),
                           ),
                         ],
                       ),
 
-                      // Layer 2: Floating Search Bar Panel with clean separation space
                       Positioned(
-                        top: 66, // Sits perfectly between header text and table card
+                        top: 66,
                         left: 0,
                         right: 0,
                         child: PosSearchPanel(
@@ -439,7 +449,6 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
   }
 }
 
-// ── Held Sales Management Dialog ──
 class _HeldSalesDialog extends StatefulWidget {
   final PosCartController controller;
 
@@ -515,7 +524,6 @@ class _HeldSalesDialogState extends State<_HeldSalesDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Row(
               children: [
                 Container(
@@ -545,7 +553,6 @@ class _HeldSalesDialogState extends State<_HeldSalesDialog> {
             const Divider(height: 1),
             const SizedBox(height: 16),
 
-            // Section 1: Hold Current Cart
             if (hasCurrentItems) ...[
               Container(
                 padding: const EdgeInsets.all(14),
@@ -611,7 +618,6 @@ class _HeldSalesDialogState extends State<_HeldSalesDialog> {
               const SizedBox(height: 16),
             ],
 
-            // Section 2: List of Held Orders
             Text('Saved Held Orders (${ctrl.heldSales.length})',
                 style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Color(0xFF1E293B))),
             const SizedBox(height: 8),

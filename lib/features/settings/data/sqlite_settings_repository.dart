@@ -87,7 +87,7 @@ class SqliteSettingsRepository implements SettingsRepository {
     if (key.startsWith('tax_')) return SettingCategory.tax;
     if (key.startsWith('pos_')) return SettingCategory.pos;
     if (key.startsWith('printer_')) return SettingCategory.printer;
-    if (key.startsWith('barcode_')) return SettingCategory.barcode;
+    if (key.startsWith('network_')) return SettingCategory.network;
     if (key.startsWith('notif_')) return SettingCategory.notifications;
     if (key.startsWith('backup_')) return SettingCategory.backup;
     return SettingCategory.pharmacy;

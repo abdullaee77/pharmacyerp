@@ -15,13 +15,13 @@ class ExpenseController extends ChangeNotifier {
     required ExpenseRepository expenseRepository,
     AccountRepository? accountRepository,
   }) : _getExpenses = GetExpensesUseCase(expenseRepository),
-       _getSummary = GetExpenseSummaryUseCase(expenseRepository),
-       _getCategories = GetExpenseCategoriesUseCase(expenseRepository),
-       _createExpense = CreateExpenseUseCase(
-         expenseRepository: expenseRepository,
-         accountRepository: accountRepository,
-       ),
-       _deleteExpense = DeleteExpenseUseCase(expenseRepository);
+        _getSummary = GetExpenseSummaryUseCase(expenseRepository),
+        _getCategories = GetExpenseCategoriesUseCase(expenseRepository),
+        _createExpense = CreateExpenseUseCase(
+          expenseRepository: expenseRepository,
+          accountRepository: accountRepository,
+        ),
+        _deleteExpense = DeleteExpenseUseCase(expenseRepository);
 
   List<Expense> _expenses = [];
   List<ExpenseCategory> _categories = [];
@@ -38,10 +38,12 @@ class ExpenseController extends ChangeNotifier {
   String? get error => _error;
   String? get categoryFilter => _categoryFilter;
 
-  Future<void> loadAll() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadAll({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final expensesR = await _getExpenses.execute(
       searchQuery: _searchQuery.isEmpty ? null : _searchQuery,

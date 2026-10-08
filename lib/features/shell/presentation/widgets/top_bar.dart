@@ -26,7 +26,10 @@ class TopBar extends StatelessWidget {
         ? user.fullName.substring(0, 2).toUpperCase()
         : 'SY';
     final displayName = user?.fullName.split(' ').first ?? 'System';
-    final roleLabel = user?.role.label ?? 'Administrator';
+    // Show the real (possibly custom) role name, not the mapped enum label.
+    final roleLabel = user == null
+        ? 'Administrator'
+        : (user.roleName.isNotEmpty ? user.roleName : user.role.label);
 
     return Container(
       height: 58,

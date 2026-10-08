@@ -14,12 +14,12 @@ class SupplierController extends ChangeNotifier {
   final RecordSupplierPaymentUseCase _recordPayment;
 
   SupplierController({required SupplierRepository repository})
-    : _getSuppliers = GetSuppliersUseCase(repository),
-      _createSupplier = CreateSupplierUseCase(repository),
-      _updateSupplier = UpdateSupplierUseCase(repository),
-      _deleteSupplier = DeleteSupplierUseCase(repository),
-      _getLedger = GetSupplierLedgerUseCase(repository),
-      _recordPayment = RecordSupplierPaymentUseCase(repository);
+      : _getSuppliers = GetSuppliersUseCase(repository),
+        _createSupplier = CreateSupplierUseCase(repository),
+        _updateSupplier = UpdateSupplierUseCase(repository),
+        _deleteSupplier = DeleteSupplierUseCase(repository),
+        _getLedger = GetSupplierLedgerUseCase(repository),
+        _recordPayment = RecordSupplierPaymentUseCase(repository);
 
   List<SupplierWithBalance> _suppliers = [];
   bool _isLoading = false;
@@ -32,10 +32,12 @@ class SupplierController extends ChangeNotifier {
   String? get error => _error;
   List<SupplierLedgerRow> get activeLedger => _activeLedger;
 
-  Future<void> loadSuppliers() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadSuppliers({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final result = await _getSuppliers.execute(
       searchQuery: _searchQuery.isEmpty ? null : _searchQuery,
@@ -44,6 +46,7 @@ class SupplierController extends ChangeNotifier {
     result.fold(
       onSuccess: (data) {
         _suppliers = data;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },

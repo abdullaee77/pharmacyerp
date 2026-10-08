@@ -4,7 +4,9 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
 import '../../../authentication/presentation/controllers/auth_controller.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/customer.dart';
 import '../controllers/customer_controller.dart';
 import '../widgets/customer_form_dialog.dart';
@@ -32,6 +34,13 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       widget.controller.loadCustomers();
     });
   }
+
+  bool get _canAdd => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.customers, PermissionAction.add);
+  bool get _canEdit => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.customers, PermissionAction.edit);
+  bool get _canDelete => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.customers, PermissionAction.delete);
 
   Future<void> _addCustomer() async {
     final error = await showDialog<String>(
@@ -66,11 +75,15 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       builder: (ctx) => CustomerProfileDialog(
         controller: widget.controller,
         customer: cwb,
-        operatorName: widget.authController.currentUser?.fullName ?? 'Operator',
-        onEdit: () {
+        operatorName:
+        widget.authController.currentUser?.fullName ?? 'Operator',
+        user: widget.authController.currentUser,
+        onEdit: _canEdit
+            ? () {
           Navigator.of(ctx).pop();
           _editCustomer(cwb.customer);
-        },
+        }
+            : null,
       ),
     );
   }
@@ -80,7 +93,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       context,
       title: 'Delete Customer?',
       message:
-          '"${c.name}" and all their ledger entries will be removed permanently.',
+      '"${c.name}" and all their ledger entries will be removed permanently.',
       confirmLabel: 'Delete',
     );
     if (ok) {
@@ -105,11 +118,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           children: [
             Row(
               children: [
-                const Icon(
-                  Icons.people_rounded,
-                  color: AppColors.primary,
-                  size: 28,
-                ),
+                const Icon(Icons.people_rounded,
+                    color: AppColors.primary, size: 28),
                 const SizedBox(width: AppSpacing.md),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -122,12 +132,13 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                   ],
                 ),
                 const Spacer(),
-                AppButton(
-                  label: 'Add Customer',
-                  icon: Icons.person_add_outlined,
-                  variant: AppButtonVariant.primary,
-                  onPressed: _addCustomer,
-                ),
+                if (_canAdd)
+                  AppButton(
+                    label: 'Add Customer',
+                    icon: Icons.person_add_outlined,
+                    variant: AppButtonVariant.primary,
+                    onPressed: _addCustomer,
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -145,8 +156,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   }
 
   Widget _buildTable(CustomerController ctrl) {
-    if (ctrl.isLoading)
+    if (ctrl.isLoading) {
       return const AppLoading(message: 'Loading customers...');
+    }
     if (ctrl.error != null) {
       return AppEmptyState(
         icon: Icons.error_outline_rounded,
@@ -160,9 +172,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
         icon: Icons.people_outline_rounded,
         title: 'No customers yet',
         subtitle:
-            'Add your first customer to start tracking credit sales and payments.',
-        actionLabel: 'Add Customer',
-        onAction: _addCustomer,
+        'Add your first customer to start tracking credit sales and payments.',
+        actionLabel: _canAdd ? 'Add Customer' : null,
+        onAction: _canAdd ? _addCustomer : null,
       );
     }
 
@@ -193,9 +205,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             rows: ctrl.customers.map((cwb) {
               final c = cwb.customer;
               final out = cwb.outstanding;
-              final outColor = out.paisa > 0
-                  ? AppColors.warning
-                  : AppColors.textPrimary;
+              final outColor =
+              out.paisa > 0 ? AppColors.warning : AppColors.textPrimary;
 
               return DataRow(
                 onSelectChanged: (_) => _openProfile(cwb),
@@ -248,22 +259,24 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                           splashRadius: 16,
                           onPressed: () => _openProfile(cwb),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined, size: 16),
-                          tooltip: 'Edit',
-                          splashRadius: 16,
-                          onPressed: () => _editCustomer(c),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline_rounded,
-                            size: 16,
-                            color: AppColors.error,
+                        if (_canEdit)
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, size: 16),
+                            tooltip: 'Edit',
+                            splashRadius: 16,
+                            onPressed: () => _editCustomer(c),
                           ),
-                          tooltip: 'Delete',
-                          splashRadius: 16,
-                          onPressed: () => _deleteCustomer(c),
-                        ),
+                        if (_canDelete)
+                          IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              size: 16,
+                              color: AppColors.error,
+                            ),
+                            tooltip: 'Delete',
+                            splashRadius: 16,
+                            onPressed: () => _deleteCustomer(c),
+                          ),
                       ],
                     ),
                   ),

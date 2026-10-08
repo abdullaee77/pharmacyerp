@@ -4,8 +4,10 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
 import '../../../authentication/presentation/controllers/auth_controller.dart';
 import '../../../medicines/domain/value_objects.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/inventory_movement.dart';
 import '../controllers/inventory_controller.dart';
 import '../widgets/adjust_stock_dialog.dart';
@@ -35,13 +37,17 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
     });
   }
 
+  bool get _canAdjust => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.inventory, PermissionAction.adjust);
+
   Future<void> _openAdjustDialog(InventoryStock stock) async {
     final error = await showDialog<String>(
       context: context,
       builder: (ctx) => AdjustStockDialog(
         controller: widget.controller,
         stock: stock,
-        operatorName: widget.authController.currentUser?.fullName ?? 'System Operator',
+        operatorName:
+        widget.authController.currentUser?.fullName ?? 'System Operator',
       ),
     );
 
@@ -72,15 +78,16 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Module Header
             Row(
               children: [
-                const Icon(Icons.inventory_2_rounded, color: AppColors.primary, size: 28),
+                const Icon(Icons.inventory_2_rounded,
+                    color: AppColors.primary, size: 28),
                 const SizedBox(width: AppSpacing.md),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Inventory Management', style: AppTypography.pageTitle),
+                    Text('Inventory Management',
+                        style: AppTypography.pageTitle),
                     Text(
                       'Live stock balance sheet and adjustment controls.',
                       style: AppTypography.bodySmall,
@@ -91,7 +98,6 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
             ),
             const SizedBox(height: AppSpacing.lg),
 
-            // Filter Command Row
             Row(
               children: [
                 AppSearchBar(
@@ -108,13 +114,17 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                     decoration: const InputDecoration(
                       hintText: 'Filter Status',
                       isDense: true,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     ),
                     items: const [
-                      DropdownMenuItem(value: null, child: Text('All Stock States')),
+                      DropdownMenuItem(
+                          value: null, child: Text('All Stock States')),
                       DropdownMenuItem(value: 'in', child: Text('In Stock')),
-                      DropdownMenuItem(value: 'low', child: Text('Low Stock Alerts')),
-                      DropdownMenuItem(value: 'out', child: Text('Out of Stock')),
+                      DropdownMenuItem(
+                          value: 'low', child: Text('Low Stock Alerts')),
+                      DropdownMenuItem(
+                          value: 'out', child: Text('Out of Stock')),
                     ],
                     onChanged: ctrl.filterByStatus,
                   ),
@@ -123,7 +133,6 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
             ),
             const SizedBox(height: AppSpacing.lg),
 
-            // Stocks Data Table
             Expanded(child: _buildTable(ctrl)),
           ],
         );
@@ -133,7 +142,8 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
 
   Widget _buildTable(InventoryController ctrl) {
     if (ctrl.isLoading) {
-      return const AppLoading(type: AppLoadingType.spinner, message: 'Loading stock sheets...');
+      return const AppLoading(
+          type: AppLoadingType.spinner, message: 'Loading stock sheets...');
     }
 
     if (ctrl.error != null) {
@@ -207,27 +217,35 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                   DataCell(
                     Text(
                       s.medicine.name,
-                      style: AppTypography.tableCell.copyWith(fontWeight: FontWeight.w600),
+                      style: AppTypography.tableCell
+                          .copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),
-                  DataCell(Text(s.medicine.genericName, style: AppTypography.tableCell)),
-                  DataCell(Text('${s.currentStock.value}', style: AppTypography.numeric)),
-                  DataCell(Text('${s.medicine.minStockLevel.value}', style: AppTypography.numericSmall)),
-                  DataCell(Text(s.medicine.sellingPrice.display, style: AppTypography.numericSmall)),
-                  DataCell(Text(displayVal, style: AppTypography.numeric.copyWith(fontWeight: FontWeight.bold))),
+                  DataCell(Text(s.medicine.genericName,
+                      style: AppTypography.tableCell)),
+                  DataCell(Text('${s.currentStock.value}',
+                      style: AppTypography.numeric)),
+                  DataCell(Text('${s.medicine.minStockLevel.value}',
+                      style: AppTypography.numericSmall)),
+                  DataCell(Text(s.medicine.sellingPrice.display,
+                      style: AppTypography.numericSmall)),
+                  DataCell(Text(displayVal,
+                      style: AppTypography.numeric
+                          .copyWith(fontWeight: FontWeight.bold))),
                   DataCell(statusBadge),
                   DataCell(
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        AppButton(
-                          label: 'Adjust',
-                          icon: Icons.tune_rounded,
-                          variant: AppButtonVariant.outlined,
-                          size: AppButtonSize.small,
-                          onPressed: () => _openAdjustDialog(s),
-                        ),
-                        const SizedBox(width: 8),
+                        if (_canAdjust)
+                          AppButton(
+                            label: 'Adjust',
+                            icon: Icons.tune_rounded,
+                            variant: AppButtonVariant.outlined,
+                            size: AppButtonSize.small,
+                            onPressed: () => _openAdjustDialog(s),
+                          ),
+                        if (_canAdjust) const SizedBox(width: 8),
                         IconButton(
                           icon: const Icon(Icons.history_rounded, size: 18),
                           tooltip: 'Transaction Audit Logs',

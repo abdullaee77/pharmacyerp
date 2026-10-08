@@ -21,9 +21,9 @@ class RoleId extends ValueObject {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is RoleId &&
-          runtimeType == other.runtimeType &&
-          value == other.value;
+          other is RoleId &&
+              runtimeType == other.runtimeType &&
+              value == other.value;
 
   @override
   int get hashCode => value.hashCode;
@@ -77,10 +77,10 @@ class Permission {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is Permission &&
-          runtimeType == other.runtimeType &&
-          category == other.category &&
-          action == other.action;
+          other is Permission &&
+              runtimeType == other.runtimeType &&
+              category == other.category &&
+              action == other.action;
 
   @override
   int get hashCode => Object.hash(category, action);
@@ -140,6 +140,19 @@ class Permission {
 
     return {};
   }
+}
+
+/// Builds a permission set from `role_permissions` rows. Unknown rows are skipped.
+Set<Permission> permissionsFromRows(Iterable<Map<String, dynamic>> rows) {
+  final result = <Permission>{};
+  for (final r in rows) {
+    final cats = PermissionCategory.values.where((e) => e.name == r['category']);
+    final acts = PermissionAction.values.where((e) => e.name == r['action']);
+    if (cats.isNotEmpty && acts.isNotEmpty) {
+      result.add(Permission(cats.first, acts.first));
+    }
+  }
+  return result;
 }
 
 /// Role entity.

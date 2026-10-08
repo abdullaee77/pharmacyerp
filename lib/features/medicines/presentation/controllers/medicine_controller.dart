@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:pharmacy/core/data/database_helper.dart'; // Robust absolute package import
+import 'package:pharmacy/core/data/database_helper.dart';
 import '../../../inventory/domain/batch.dart';
 import '../../domain/medicine.dart';
 import '../../domain/medicine_repository.dart';
@@ -29,16 +29,18 @@ class MedicineController extends ChangeNotifier {
   String? get error => _error;
   String get filter => _filter;
 
-  Future<void> loadMedicines() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadMedicines({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
-    // Changed from getAllMedicines() to getMedicines() to match MedicineRepository signature
     final result = await _repository.getMedicines();
     result.fold(
       onSuccess: (data) {
         _medicines = data;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },

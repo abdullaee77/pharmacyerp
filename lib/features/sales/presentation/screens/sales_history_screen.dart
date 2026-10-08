@@ -4,7 +4,9 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
 import '../../../authentication/presentation/controllers/auth_controller.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/sale.dart';
 import '../controllers/sales_controller.dart';
 import '../widgets/sales_return_dialog.dart';
@@ -24,6 +26,12 @@ class SalesHistoryScreen extends StatefulWidget {
 }
 
 class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
+  bool get _canReturn => PermissionGate.allow(
+    widget.authController.currentUser,
+    PermissionCategory.sales,
+    PermissionAction.returnAction,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -171,12 +179,19 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                       variant: badgeVariant,
                       isDot: true)),
                   DataCell(
-                    AppButton(
-                      label: 'Return',
-                      icon: Icons.assignment_return_outlined,
-                      variant: AppButtonVariant.outlined,
-                      size: AppButtonSize.small,
-                      onPressed: () => _openReturn(s),
+                    PermissionGate.disable(
+                      widget.authController.currentUser,
+                      PermissionCategory.sales,
+                      PermissionAction.returnAction,
+                      AppButton(
+                        label: 'Return',
+                        icon: Icons.assignment_return_outlined,
+                        variant: AppButtonVariant.outlined,
+                        size: AppButtonSize.small,
+                        onPressed: s.status == SaleStatus.returned
+                            ? null
+                            : () => _openReturn(s),
+                      ),
                     ),
                   ),
                 ],

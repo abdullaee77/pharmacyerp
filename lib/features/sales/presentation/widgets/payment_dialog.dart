@@ -6,6 +6,7 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../authentication/domain/user.dart';
 import '../../../medicines/domain/value_objects.dart';
 import '../../domain/payment.dart';
 import '../../domain/sale.dart';
@@ -45,12 +46,14 @@ class PaymentDialog extends StatefulWidget {
   final PosCartController cartController;
   final SalesController salesController;
   final String operatorName;
+  final User? user;
 
   const PaymentDialog({
     super.key,
     required this.cartController,
     required this.salesController,
     required this.operatorName,
+    this.user,
   });
 
   @override
@@ -99,7 +102,6 @@ class _PaymentDialogState extends State<PaymentDialog> {
 
     setState(() => _isProcessing = true);
 
-    // Save Customer Details to Cart Context
     widget.cartController.setCustomer(
       _customerNameCtrl.text,
       phone: _customerPhoneCtrl.text,
@@ -146,7 +148,6 @@ class _PaymentDialogState extends State<PaymentDialog> {
       PaymentTender(method: _primaryMethod, amount: Money.fromPkr(_totalTendered)),
     ];
 
-    // Pass customerPhone along to completeSale
     final error = await widget.salesController.completeSale(
       sale: sale,
       tenders: tenders,
@@ -196,7 +197,6 @@ class _PaymentDialogState extends State<PaymentDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header
             Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
               child: Row(
@@ -221,7 +221,6 @@ class _PaymentDialogState extends State<PaymentDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Customer Details
                     Text('Customer Details', style: AppTypography.subtitle),
                     const SizedBox(height: AppSpacing.sm),
                     Row(
@@ -246,7 +245,6 @@ class _PaymentDialogState extends State<PaymentDialog> {
                     ),
                     const SizedBox(height: AppSpacing.lg),
 
-                    // Totals block
                     Container(
                       padding: const EdgeInsets.all(AppSpacing.md),
                       decoration: BoxDecoration(
@@ -264,7 +262,6 @@ class _PaymentDialogState extends State<PaymentDialog> {
                     ),
                     const SizedBox(height: AppSpacing.lg),
 
-                    // Payment method
                     Text('Payment Method', style: AppTypography.subtitle),
                     const SizedBox(height: AppSpacing.sm),
                     Wrap(
@@ -288,7 +285,6 @@ class _PaymentDialogState extends State<PaymentDialog> {
                     ),
                     const SizedBox(height: AppSpacing.lg),
 
-                    // Change / outstanding display
                     Container(
                       padding: const EdgeInsets.all(AppSpacing.md),
                       decoration: BoxDecoration(

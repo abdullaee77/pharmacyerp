@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
+import '../../../authentication/domain/user.dart';
 import '../../domain/navigation_item.dart';
 
 class TopNavBar extends StatelessWidget {
   final NavigationItem selectedItem;
-  final ValueChanged<NavigationItem> onItemSelected;
+  final ValueChanged<int> onItemSelected;
   final bool isRibbonCollapsed;
   final VoidCallback? onToggleRibbon;
+  final User? user;
 
   const TopNavBar({
     super.key,
@@ -15,17 +17,21 @@ class TopNavBar extends StatelessWidget {
     required this.onItemSelected,
     this.isRibbonCollapsed = true,
     this.onToggleRibbon,
+    required this.user,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Only show tabs the user has permission to see
+    final visibleItems = NavigationItem.values
+        .where((item) => item.isAllowedFor(user))
+        .toList();
+
     return Container(
-      height: 50, // Slightly taller height for breathable spacing
+      height: 50,
       decoration: BoxDecoration(
         color: AppColors.surface,
-        border: Border(
-          bottom: BorderSide(color: AppColors.border, width: 1),
-        ),
+        border: const Border(bottom: BorderSide(color: AppColors.border, width: 1)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.02),
@@ -35,7 +41,7 @@ class TopNavBar extends StatelessWidget {
         ],
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch, // Stretch tab buttons to fill height
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SizedBox(width: 12),
           Expanded(
@@ -44,12 +50,12 @@ class TopNavBar extends StatelessWidget {
               physics: const ClampingScrollPhysics(),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: NavigationItem.values.map((item) {
+                children: visibleItems.map((item) {
                   final isSelected = selectedItem == item;
                   return _NavTabButton(
                     item: item,
                     isSelected: isSelected,
-                    onTap: () => onItemSelected(item),
+                    onTap: () => onItemSelected(item.index),
                   );
                 }).toList(),
               ),
@@ -86,12 +92,12 @@ class _NavTabButton extends StatelessWidget {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            alignment: Alignment.center, // Vertically center icon & text
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
                   color: isSelected ? AppColors.primary : Colors.transparent,
-                  width: 3.5, // Bold active indicator pinned at the very bottom
+                  width: 3.5,
                 ),
               ),
             ),

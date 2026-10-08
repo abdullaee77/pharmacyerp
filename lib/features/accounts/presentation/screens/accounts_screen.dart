@@ -4,6 +4,9 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../authentication/presentation/controllers/auth_controller.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/account.dart';
 import '../controllers/account_controller.dart';
 import '../widgets/account_form_dialog.dart';
@@ -11,8 +14,13 @@ import '../widgets/account_ledger_dialog.dart';
 
 class AccountsScreen extends StatefulWidget {
   final AccountController controller;
+  final AuthController authController;
 
-  const AccountsScreen({super.key, required this.controller});
+  const AccountsScreen({
+    super.key,
+    required this.controller,
+    required this.authController,
+  });
 
   @override
   State<AccountsScreen> createState() => _AccountsScreenState();
@@ -26,6 +34,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
       widget.controller.loadAccounts();
     });
   }
+
+  bool get _canAdd => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.accounts, PermissionAction.add);
+  bool get _canEdit => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.accounts, PermissionAction.edit);
+  bool get _canDelete => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.accounts, PermissionAction.delete);
 
   Future<void> _add() async {
     final error = await showDialog<String>(
@@ -103,12 +118,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
                   ],
                 ),
                 const Spacer(),
-                AppButton(
-                  label: 'Add Account',
-                  icon: Icons.add_rounded,
-                  variant: AppButtonVariant.primary,
-                  onPressed: _add,
-                ),
+                if (_canAdd)
+                  AppButton(
+                    label: 'Add Account',
+                    icon: Icons.add_rounded,
+                    variant: AppButtonVariant.primary,
+                    onPressed: _add,
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -139,9 +155,10 @@ class _AccountsScreenState extends State<AccountsScreen> {
       return AppEmptyState(
         icon: Icons.account_balance_outlined,
         title: 'No accounts yet',
-        subtitle: 'Add Cash, Bank, or Expense accounts to track financial activity.',
-        actionLabel: 'Add Account',
-        onAction: _add,
+        subtitle:
+        'Add Cash, Bank, or Expense accounts to track financial activity.',
+        actionLabel: _canAdd ? 'Add Account' : null,
+        onAction: _canAdd ? _add : null,
       );
     }
 
@@ -209,19 +226,21 @@ class _AccountsScreenState extends State<AccountsScreen> {
                         splashRadius: 16,
                         onPressed: () => _openLedger(awb),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined, size: 16),
-                        tooltip: 'Edit',
-                        splashRadius: 16,
-                        onPressed: () => _edit(a),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded,
-                            size: 16, color: AppColors.error),
-                        tooltip: 'Delete',
-                        splashRadius: 16,
-                        onPressed: () => _delete(a),
-                      ),
+                      if (_canEdit)
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined, size: 16),
+                          tooltip: 'Edit',
+                          splashRadius: 16,
+                          onPressed: () => _edit(a),
+                        ),
+                      if (_canDelete)
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded,
+                              size: 16, color: AppColors.error),
+                          tooltip: 'Delete',
+                          splashRadius: 16,
+                          onPressed: () => _delete(a),
+                        ),
                     ],
                   )),
                 ],

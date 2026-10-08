@@ -2,13 +2,14 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
+import '../../features/users/domain/role.dart';
 
 class DatabaseHelper {
   DatabaseHelper._();
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String _dbName = 'pharmasuite.db';
-  static const int _dbVersion = 11;
+  static const int _dbVersion = 13;
 
   Database? _database;
 
@@ -41,7 +42,9 @@ class DatabaseHelper {
     await _createAccountsTables(db);
     await _createExpensesTables(db);
     await _createUsersTables(db);
+    await _seedBuiltInPermissions(db);
     await _createSettingsTable(db);
+    await _createConnectedClientsTable(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -71,6 +74,12 @@ class DatabaseHelper {
       await db.execute("ALTER TABLE medicines ADD COLUMN drug_schedule TEXT NOT NULL DEFAULT ''");
       await db.execute("ALTER TABLE medicines ADD COLUMN storage_instructions TEXT NOT NULL DEFAULT ''");
       await db.execute("ALTER TABLE medicines ADD COLUMN unit TEXT NOT NULL DEFAULT 'Tab'");
+    }
+    if (oldVersion < 12) {
+      await _createConnectedClientsTable(db);
+    }
+    if (oldVersion < 13) {
+      await _seedBuiltInPermissions(db);
     }
   }
 
@@ -491,12 +500,55 @@ class DatabaseHelper {
     );
   }
 
+  /// Seeds default permissions for built-in roles, only if the role has none yet.
+  Future<void> _seedBuiltInPermissions(Database db) async {
+    for (final roleId in [
+      RoleId.admin,
+      RoleId.manager,
+      RoleId.pharmacist,
+      RoleId.cashier,
+    ]) {
+      final count = Sqflite.firstIntValue(await db.rawQuery(
+        'SELECT COUNT(*) FROM role_permissions WHERE role_id = ?',
+        [roleId.value],
+      )) ??
+          0;
+      if (count > 0) continue;
+
+      final batch = db.batch();
+      for (final perm in Permission.defaultsFor(roleId)) {
+        batch.insert(
+          'role_permissions',
+          {
+            'role_id': roleId.value,
+            'category': perm.category.name,
+            'action': perm.action.name,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+      await batch.commit(noResult: true);
+    }
+  }
+
   Future<void> _createSettingsTable(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL DEFAULT '',
         updated_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createConnectedClientsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS connected_clients (
+        client_id TEXT PRIMARY KEY,
+        pc_name TEXT NOT NULL,
+        ip_address TEXT NOT NULL,
+        connected_at TEXT NOT NULL,
+        last_heartbeat TEXT NOT NULL
       )
     ''');
   }

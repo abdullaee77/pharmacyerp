@@ -4,8 +4,10 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
 import '../../../accounts/presentation/controllers/account_controller.dart';
 import '../../../authentication/presentation/controllers/auth_controller.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/expense.dart';
 import '../controllers/expense_controller.dart';
 import '../widgets/expense_form_dialog.dart';
@@ -36,12 +38,19 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     });
   }
 
+  // Expenses live under the Accounts category — matches your Permission Mapping.
+  bool get _canAdd => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.accounts, PermissionAction.add);
+  bool get _canDelete => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.accounts, PermissionAction.delete);
+
   Future<void> _add() async {
     final error = await showDialog<String>(
       context: context,
       builder: (ctx) => ExpenseFormDialog(
         controller: widget.controller,
-        operatorName: widget.authController.currentUser?.fullName ?? 'Operator',
+        operatorName:
+        widget.authController.currentUser?.fullName ?? 'Operator',
         accounts: widget.accountController.accounts,
       ),
     );
@@ -58,7 +67,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       context,
       title: 'Delete Expense?',
       message:
-          'This expense will be removed. Linked account transactions will remain.',
+      'This expense will be removed. Linked account transactions will remain.',
       confirmLabel: 'Delete',
     );
     if (ok) {
@@ -88,11 +97,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           children: [
             Row(
               children: [
-                const Icon(
-                  Icons.money_off_rounded,
-                  color: AppColors.primary,
-                  size: 28,
-                ),
+                const Icon(Icons.money_off_rounded,
+                    color: AppColors.primary, size: 28),
                 const SizedBox(width: AppSpacing.md),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -105,42 +111,33 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                   ],
                 ),
                 const Spacer(),
-                AppButton(
-                  label: 'Record Expense',
-                  icon: Icons.add_rounded,
-                  variant: AppButtonVariant.primary,
-                  onPressed: _add,
-                ),
+                if (_canAdd)
+                  AppButton(
+                    label: 'Record Expense',
+                    icon: Icons.add_rounded,
+                    variant: AppButtonVariant.primary,
+                    onPressed: _add,
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
 
-            // Summary cards
             if (summary != null)
               Row(
                 children: [
                   Expanded(
                     child: _sumCard(
-                      'TODAY',
-                      summary.today.display,
-                      AppColors.primary,
-                    ),
+                        'TODAY', summary.today.display, AppColors.primary),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: _sumCard('THIS MONTH', summary.thisMonth.display,
+                        AppColors.secondary),
                   ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: _sumCard(
-                      'THIS MONTH',
-                      summary.thisMonth.display,
-                      AppColors.secondary,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: _sumCard(
-                      'TOTAL',
-                      summary.total.display,
-                      AppColors.warning,
-                    ),
+                        'TOTAL', summary.total.display, AppColors.warning),
                   ),
                 ],
               ),
@@ -173,7 +170,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         child: Text('All Categories'),
                       ),
                       ...ctrl.categories.map(
-                        (c) => DropdownMenuItem(
+                            (c) => DropdownMenuItem(
                           value: c.name,
                           child: Text(c.name),
                         ),
@@ -239,8 +236,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         icon: Icons.money_off_outlined,
         title: 'No expenses yet',
         subtitle: 'Record your first expense to start tracking spending.',
-        actionLabel: 'Record Expense',
-        onAction: _add,
+        actionLabel: _canAdd ? 'Record Expense' : null,
+        onAction: _canAdd ? _add : null,
       );
     }
 
@@ -302,7 +299,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     ),
                   ),
                   DataCell(
-                    IconButton(
+                    _canDelete
+                        ? IconButton(
                       icon: const Icon(
                         Icons.delete_outline_rounded,
                         size: 16,
@@ -311,7 +309,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       tooltip: 'Delete',
                       splashRadius: 16,
                       onPressed: () => _delete(e),
-                    ),
+                    )
+                        : const SizedBox.shrink(),
                   ),
                 ],
               );

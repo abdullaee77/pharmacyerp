@@ -22,7 +22,7 @@ class SqliteSalesRepository implements SalesRepository {
 
   Future<sql.Database> get _db => _dbHelper.database;
 
-  // ─── CREATE SALE (transactional) ─────────────────────────────
+  // ─── CREATE SALE ─────────────────────────────────────────────
 
   @override
   Future<Result<Sale>> createSale({
@@ -211,13 +211,26 @@ class SqliteSalesRepository implements SalesRepository {
     }
   }
 
-  // ─── RETURNS ─────────────────────────────────────────────────
+  // ─── ATOMIC SALES RETURNS ────────────────────────────────────
 
   @override
   Future<Result<SalesReturn>> createSalesReturn(SalesReturn r) async {
     try {
       final db = await _db;
+
+      // Damaged / expired items are NOT restocked
+      final restock = r.reason != SalesReturnReason.damaged &&
+          r.reason != SalesReturnReason.expired;
+
       await db.transaction((txn) async {
+        // Idempotency guard
+        final existing = await txn.rawQuery(
+          'SELECT 1 FROM sales_returns WHERE id = ? LIMIT 1',
+          [r.id.value],
+        );
+        if (existing.isNotEmpty) return;
+
+        // 1. Return header + items
         await txn.insert('sales_returns', {
           'id': r.id.value,
           'original_sale_id': r.originalSaleId.value,
@@ -243,7 +256,37 @@ class SqliteSalesRepository implements SalesRepository {
           });
         }
 
-        // Update original sale status.
+        // 2. Restore stock (only for resellable returns)
+        if (restock) {
+          final nowIso = DateTime.now().toIso8601String();
+          for (var i = 0; i < r.items.length; i++) {
+            final item = r.items[i];
+
+            await txn.rawUpdate(
+              'UPDATE batches SET quantity = quantity + ?, updated_at = ? WHERE id = ?',
+              [item.quantity, nowIso, item.batchId.value],
+            );
+
+            await txn.rawUpdate(
+              'UPDATE inventory_stocks SET quantity = quantity + ? WHERE medicine_id = ?',
+              [item.quantity, item.medicineId.value],
+            );
+
+            await txn.insert('inventory_movements', {
+              'id': 'mov_sret_${r.id.value}_${i}_${item.medicineId.value}',
+              'medicine_id': item.medicineId.value,
+              'batch_id': item.batchId.value,
+              'type': 'sale_return',
+              'quantity_changed': item.quantity,
+              'reason': 'Sales Return (Return ID: ${r.id.value})',
+              'reference': r.originalInvoiceNumber,
+              'operator_name': r.operatorName,
+              'created_at': nowIso,
+            });
+          }
+        }
+
+        // 3. Update original sale status
         await txn.update(
           'sales',
           {'status': SaleStatus.partiallyReturned.name},
@@ -254,7 +297,7 @@ class SqliteSalesRepository implements SalesRepository {
 
       return Success(r);
     } catch (e) {
-      return Failure(DatabaseFailure(message: 'Failed to save return: $e'));
+      return Failure(DatabaseFailure(message: 'Atomic sales return failed: $e'));
     }
   }
 
@@ -331,6 +374,5 @@ class SqliteSalesRepository implements SalesRepository {
   }
 }
 
-/// Dummy import to silence unused import warning.
 // ignore: unused_element
 void _keepJson() => jsonEncode({});

@@ -15,14 +15,14 @@ class UserController extends ChangeNotifier {
   final DeleteRoleUseCase _deleteRole;
 
   UserController({required UserRepository repository})
-    : _getUsers = GetUsersUseCase(repository),
-      _createUser = CreateUserUseCase(repository),
-      _updateUser = UpdateUserUseCase(repository),
-      _changeStatus = ChangeUserStatusUseCase(repository),
-      _resetPassword = ResetPasswordUseCase(repository),
-      _getRoles = GetRolesUseCase(repository),
-      _saveRole = SaveRoleUseCase(repository),
-      _deleteRole = DeleteRoleUseCase(repository);
+      : _getUsers = GetUsersUseCase(repository),
+        _createUser = CreateUserUseCase(repository),
+        _updateUser = UpdateUserUseCase(repository),
+        _changeStatus = ChangeUserStatusUseCase(repository),
+        _resetPassword = ResetPasswordUseCase(repository),
+        _getRoles = GetRolesUseCase(repository),
+        _saveRole = SaveRoleUseCase(repository),
+        _deleteRole = DeleteRoleUseCase(repository);
 
   List<AppUser> _users = [];
   List<Role> _roles = [];
@@ -35,16 +35,20 @@ class UserController extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  Future<void> loadUsers() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadUsers({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
+
     final r = await _getUsers.execute(
       searchQuery: _searchQuery.isEmpty ? null : _searchQuery,
     );
     r.fold(
       onSuccess: (d) {
         _users = d;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },
@@ -99,13 +103,18 @@ class UserController extends ChangeNotifier {
     return r.fold(onSuccess: (_) => null, onFailure: (f) => f.message);
   }
 
-  Future<void> loadRoles() async {
-    _isLoading = true;
-    notifyListeners();
+  Future<void> loadRoles({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
+
     final r = await _getRoles.execute();
     r.fold(
       onSuccess: (d) {
         _roles = d;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },

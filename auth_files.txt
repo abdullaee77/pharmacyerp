@@ -1,0 +1,1583 @@
+
+============================================================
+FILE: lib\core\network\api_server.dart
+============================================================
+
+// lib/core/network/api_server.dart
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'package:shelf/shelf.dart';
+import 'package:shelf/shelf_io.dart' as shelf_io;
+import 'package:shelf_router/shelf_router.dart';
+import '../data/database_helper.dart';
+import '../data/sale_transaction.dart';
+import '../data/purchase_transaction.dart';
+import '../data/return_transactions.dart';
+import '../data/stock_adjustment_transaction.dart';
+import '../data/payment_transaction.dart';
+import '../data/expense_transaction.dart';
+import 'api_permissions.dart';
+import 'connection_tracker.dart';
+
+class ApiServer {
+  final DatabaseHelper _dbHelper;
+  final ConnectionTracker _tracker;
+  HttpServer? _server;
+  int _port;
+  int _dataVersion = 1;
+
+  final List<Completer<void>> _versionWaiters = [];
+  final Map<String, ApiSession> _sessions = {};
+  final Map<String, _FailedLogins> _failedLogins = {};
+
+  Timer? _watchTimer;
+  Timer? _sessionTimer;
+  bool _watching = false;
+  int _lastTotalChanges = -1;
+
+  static const Duration _sessionIdleTimeout = Duration(hours: 12);
+  static const Duration _permissionRecheck = Duration(seconds: 5);
+  static const int _maxFailedLogins = 5;
+  static const Duration _lockoutWindow = Duration(minutes: 1);
+
+  static final RegExp _identifier = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+  static final RegExp _orderBySafe = RegExp(r'^[A-Za-z0-9_.,\s]+$');
+
+  ApiServer({
+    required DatabaseHelper dbHelper,
+    required ConnectionTracker tracker,
+    int port = 8080,
+  })  : _dbHelper = dbHelper,
+        _tracker = tracker,
+        _port = port;
+
+  bool get isRunning => _server != null;
+  int get port => _port;
+  int get dataVersion => _dataVersion;
+
+  void bumpVersionFromLocalWrite() => _bumpVersion();
+
+  void _bumpVersion() {
+    _dataVersion++;
+    final waiters = List<Completer<void>>.from(_versionWaiters);
+    _versionWaiters.clear();
+    for (final w in waiters) {
+      if (!w.isCompleted) w.complete();
+    }
+  }
+
+  Future<int> _totalChanges() async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('SELECT total_changes() AS c');
+    return (rows.first['c'] as num).toInt();
+  }
+
+  Future<void> _syncBaselineSilently() async {
+    try {
+      _lastTotalChanges = await _totalChanges();
+    } catch (_) {}
+  }
+
+  Future<void> _afterWrite() async {
+    await _syncBaselineSilently();
+    _bumpVersion();
+  }
+
+  void _startWatcher() {
+    _watchTimer?.cancel();
+    _watchTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
+      if (_watching) return;
+      _watching = true;
+      try {
+        final c = await _totalChanges();
+        if (_lastTotalChanges < 0) {
+          _lastTotalChanges = c;
+        } else if (c != _lastTotalChanges) {
+          _lastTotalChanges = c;
+          _bumpVersion();
+        }
+      } catch (_) {
+      } finally {
+        _watching = false;
+      }
+    });
+  }
+
+  String _newToken() {
+    final rnd = Random.secure();
+    final bytes = List<int>.generate(32, (_) => rnd.nextInt(256));
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  bool _constantTimeEquals(String a, String b) {
+    if (a.length != b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) {
+      diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+    }
+    return diff == 0;
+  }
+
+  Future<Set<String>> _loadPermissionKeys(dynamic db, String roleId) async {
+    final rows = await db.rawQuery(
+      'SELECT category, action FROM role_permissions WHERE role_id = ?',
+      [roleId],
+    );
+    return {
+      for (final r in rows) '${r['category']}.${r['action']}',
+    };
+  }
+
+  Future<bool> _refreshSession(ApiSession s) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery(
+      'SELECT status, role_id FROM users WHERE id = ?',
+      [s.userId],
+    );
+    if (rows.isEmpty) return false;
+    final status = rows.first['status'] as String? ?? 'active';
+    if (status == 'inactive' || status == 'locked') return false;
+    s.roleId = rows.first['role_id'] as String? ?? '';
+    s.permissions = await _loadPermissionKeys(db, s.roleId);
+    s.lastChecked = DateTime.now();
+    return true;
+  }
+
+  Future<ApiSession?> _authenticate(Request req) async {
+    final header = req.headers['authorization'] ?? '';
+    if (!header.startsWith('Bearer ')) return null;
+    final token = header.substring(7).trim();
+    final session = _sessions[token];
+    if (session == null) return null;
+
+    final now = DateTime.now();
+    if (now.difference(session.lastUsed) > _sessionIdleTimeout) {
+      _sessions.remove(token);
+      return null;
+    }
+    session.lastUsed = now;
+
+    if (now.difference(session.lastChecked) > _permissionRecheck) {
+      final ok = await _refreshSession(session);
+      if (!ok) {
+        _sessions.remove(token);
+        return null;
+      }
+    }
+    return session;
+  }
+
+  Future<Map<String, dynamic>> _readJson(Request req) async {
+    final text = await req.readAsString();
+    if (text.trim().isEmpty) return {};
+    final decoded = jsonDecode(text);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('JSON object expected');
+    }
+    return decoded;
+  }
+
+  Future<Response> _guarded(
+      Request req,
+      Future<Response> Function(ApiSession session, Map<String, dynamic> body)
+      handler,
+      ) async {
+    try {
+      final session = await _authenticate(req);
+      if (session == null) {
+        return _jsonResponse(
+          {'error': 'Authentication required. Please log in again.'},
+          status: 401,
+        );
+      }
+      final body = await _readJson(req);
+      return await handler(session, body);
+    } on FormatException catch (e) {
+      return _jsonResponse({'error': 'Bad request: ${e.message}'}, status: 400);
+    } on SaleException catch (e) {
+      return _jsonResponse({'error': e.message}, status: 409);
+    } on PurchaseException catch (e) {
+      return _jsonResponse({'error': e.message}, status: 409);
+    } on ReturnException catch (e) {
+      return _jsonResponse({'error': e.message}, status: 409);
+    } on AdjustmentException catch (e) {
+      return _jsonResponse({'error': e.message}, status: 409);
+    } on PaymentException catch (e) {
+      return _jsonResponse({'error': e.message}, status: 409);
+    } on ExpenseException catch (e) {
+      return _jsonResponse({'error': e.message}, status: 409);
+    } catch (e) {
+      return _jsonResponse({'error': e.toString()}, status: 500);
+    }
+  }
+
+  List<dynamic>? _args(dynamic v) => v is List ? v.cast<dynamic>() : null;
+
+  int? _asInt(dynamic v) => v is num ? v.toInt() : null;
+
+  Map<String, dynamic> _dataMap(dynamic v) =>
+      v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+
+  List<Map<String, dynamic>> _sanitizeRows(List<Map<String, Object?>> rows) {
+    return rows.map((r) {
+      final m = Map<String, dynamic>.from(r);
+      m.remove('password_hash');
+      return m;
+    }).toList();
+  }
+
+  Response? _checkFragments(ApiSession s, List<String?> fragments) {
+    final used = <String>{};
+    for (final f in fragments) {
+      if (f == null || f.trim().isEmpty) continue;
+      final err = ApiAccess.scanTables(f, used);
+      if (err != null) return _jsonResponse({'error': err}, status: 403);
+    }
+    for (final t in used) {
+      if (!ApiAccess.canRead(s, t)) {
+        return _jsonResponse(
+          {'error': 'Permission denied: cannot read $t.'},
+          status: 403,
+        );
+      }
+    }
+    return null;
+  }
+
+  Response? _checkRead(ApiSession s, String table, List<String?> fragments) {
+    if (!ApiAccess.knownTable(table)) {
+      return _jsonResponse({'error': 'Table not allowed'}, status: 403);
+    }
+    if (!ApiAccess.canRead(s, table)) {
+      return _jsonResponse(
+        {'error': 'Permission denied: cannot read $table.'},
+        status: 403,
+      );
+    }
+    return _checkFragments(s, fragments);
+  }
+
+  Response? _checkWrite(
+      ApiSession s,
+      String table,
+      String op, {
+        Map<String, dynamic>? data,
+        String? where,
+      }) {
+    if (!ApiAccess.knownTable(table)) {
+      return _jsonResponse({'error': 'Table not allowed'}, status: 403);
+    }
+    if (data != null) {
+      for (final key in data.keys) {
+        if (!_identifier.hasMatch(key)) {
+          return _jsonResponse({'error': 'Invalid column name.'}, status: 400);
+        }
+      }
+    }
+    if (op != 'insert') {
+      if (where == null || where.trim().isEmpty) {
+        return _jsonResponse(
+          {'error': 'A WHERE clause is required for $op.'},
+          status: 400,
+        );
+      }
+      final frag = _checkFragments(s, [where]);
+      if (frag != null) return frag;
+    }
+    final denied = ApiAccess.checkWrite(s, table, op, data: data);
+    if (denied != null) {
+      return _jsonResponse({'error': denied}, status: 403);
+    }
+    return null;
+  }
+
+  Future<void> start() async {
+    if (_server != null) return;
+
+    final router = Router();
+
+    // ── Public endpoints ──
+    router.get('/api/status', (Request req) {
+      return _jsonResponse({
+        'status': 'ok',
+        'app': 'PharmaSuite ERP Server',
+        'connections': _tracker.activeCount,
+        'version': _dataVersion,
+      });
+    });
+
+    router.get('/api/version', (Request req) async {
+      final since = int.tryParse(req.url.queryParameters['since'] ?? '');
+      final wait = int.tryParse(req.url.queryParameters['wait'] ?? '') ?? 0;
+      if (since != null && since == _dataVersion && wait > 0) {
+        final waiter = Completer<void>();
+        _versionWaiters.add(waiter);
+        await waiter.future.timeout(
+          Duration(seconds: wait.clamp(1, 30).toInt()),
+          onTimeout: () {},
+        );
+        _versionWaiters.remove(waiter);
+      }
+      return _jsonResponse({'version': _dataVersion});
+    });
+
+    router.post('/api/heartbeat', (Request req) async {
+      try {
+        final body = await _readJson(req);
+        final clientId = body['clientId'] as String? ?? '';
+        final pcName = body['pcName'] as String? ?? 'Unknown';
+        String ip = 'unknown';
+        try {
+          final info =
+          req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
+          if (info != null) ip = info.remoteAddress.address;
+        } catch (_) {}
+        _tracker.heartbeat(clientId, pcName, ip);
+        return _jsonResponse({'status': 'ok', 'version': _dataVersion});
+      } catch (e) {
+        return _jsonResponse({'error': e.toString()}, status: 400);
+      }
+    });
+
+    router.get('/api/connections', (Request req) {
+      return _jsonResponse({
+        'clients': _tracker.activeClients.map((c) => c.toJson()).toList(),
+      });
+    });
+
+    // ── Login / logout ──
+    router.post('/api/login', (Request req) async {
+      try {
+        final body = await _readJson(req);
+        final username = (body['username'] as String? ?? '').trim();
+        final hash = body['passwordHash'] as String? ?? '';
+        if (username.isEmpty || hash.isEmpty) {
+          return _jsonResponse(
+            {'error': 'Username and password are required.'},
+            status: 400,
+          );
+        }
+
+        final key = username.toLowerCase();
+        final failed = _failedLogins[key];
+        if (failed != null) {
+          if (DateTime.now().difference(failed.first) > _lockoutWindow) {
+            _failedLogins.remove(key);
+          } else if (failed.count >= _maxFailedLogins) {
+            return _jsonResponse(
+              {'error': 'Too many failed attempts. Try again in a minute.'},
+              status: 429,
+            );
+          }
+        }
+
+        final db = await _dbHelper.database;
+        final rows = await db.rawQuery(
+          '''
+          SELECT u.id, u.username, u.full_name, u.role_id, u.status,
+                 u.password_hash, r.name AS role_name
+          FROM users u
+          LEFT JOIN roles r ON u.role_id = r.id
+          WHERE LOWER(u.username) = LOWER(?)
+          LIMIT 1
+          ''',
+          [username],
+        );
+
+        final row = rows.isEmpty ? null : rows.first;
+        final stored = row?['password_hash'] as String? ?? '';
+        final valid = row != null && _constantTimeEquals(stored, hash);
+
+        if (!valid) {
+          final current = _failedLogins[key];
+          _failedLogins[key] = current == null
+              ? _FailedLogins(1, DateTime.now())
+              : _FailedLogins(current.count + 1, current.first);
+          return _jsonResponse(
+            {'error': 'Invalid username or password.'},
+            status: 401,
+          );
+        }
+
+        final status = row['status'] as String? ?? 'active';
+        if (status == 'inactive') {
+          return _jsonResponse(
+            {'error': 'This account is inactive. Contact an administrator.'},
+            status: 403,
+          );
+        }
+        if (status == 'locked') {
+          return _jsonResponse(
+            {'error': 'This account is locked. Contact an administrator.'},
+            status: 403,
+          );
+        }
+
+        _failedLogins.remove(key);
+
+        final nowIso = DateTime.now().toIso8601String();
+        await db.update(
+          'users',
+          {'last_login_at': nowIso, 'updated_at': nowIso},
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+        await _syncBaselineSilently();
+
+        final roleId = row['role_id'] as String? ?? '';
+        final perms = await _loadPermissionKeys(db, roleId);
+        final token = _newToken();
+        _sessions[token] = ApiSession(
+          token: token,
+          userId: row['id'] as String,
+          username: row['username'] as String,
+          fullName: row['full_name'] as String,
+          roleId: roleId,
+          permissions: perms,
+        );
+
+        return _jsonResponse({
+          'token': token,
+          'user': {
+            'id': row['id'],
+            'username': row['username'],
+            'fullName': row['full_name'],
+            'roleId': roleId,
+            'roleName': row['role_name'],
+          },
+          'permissions': perms.toList(),
+          'version': _dataVersion,
+        });
+      } on FormatException catch (e) {
+        return _jsonResponse({'error': 'Bad request: ${e.message}'}, status: 400);
+      } catch (e) {
+        return _jsonResponse({'error': e.toString()}, status: 500);
+      }
+    });
+
+    router.post('/api/logout', (Request req) async {
+      final header = req.headers['authorization'] ?? '';
+      if (header.startsWith('Bearer ')) {
+        _sessions.remove(header.substring(7).trim());
+      }
+      return _jsonResponse({'status': 'ok'});
+    });
+
+    // ── Authenticated core data query/mutation endpoints ──
+    router.post('/api/query', (Request req) => _guarded(req, (s, body) async {
+      final table = body['table'] as String? ?? '';
+      final where = body['where'] as String?;
+      final orderBy = body['orderBy'] as String?;
+
+      final denied = _checkRead(s, table, [where, orderBy]);
+      if (denied != null) return denied;
+      if (orderBy != null && !_orderBySafe.hasMatch(orderBy)) {
+        return _jsonResponse({'error': 'Invalid orderBy.'}, status: 400);
+      }
+
+      final db = await _dbHelper.database;
+      final rows = await db.query(
+        table,
+        where: where,
+        whereArgs: _args(body['args']),
+        orderBy: orderBy,
+        limit: _asInt(body['limit']),
+        offset: _asInt(body['offset']),
+      );
+      return _jsonResponse({
+        'rows': _sanitizeRows(rows),
+        'version': _dataVersion,
+      });
+    }));
+
+    router.post('/api/insert', (Request req) => _guarded(req, (s, body) async {
+      final table = body['table'] as String? ?? '';
+      final data = _dataMap(body['data']);
+
+      final denied = _checkWrite(s, table, 'insert', data: data);
+      if (denied != null) return denied;
+
+      final db = await _dbHelper.database;
+      final id = await db.insert(table, data);
+      await _afterWrite();
+      return _jsonResponse({'insertedId': id, 'version': _dataVersion});
+    }));
+
+    router.post('/api/update', (Request req) => _guarded(req, (s, body) async {
+      final table = body['table'] as String? ?? '';
+      final data = _dataMap(body['data']);
+      final where = body['where'] as String?;
+
+      final denied =
+      _checkWrite(s, table, 'update', data: data, where: where);
+      if (denied != null) return denied;
+
+      final db = await _dbHelper.database;
+      final count = await db.update(
+        table,
+        data,
+        where: where,
+        whereArgs: _args(body['args']),
+      );
+      if (count > 0) await _afterWrite();
+      return _jsonResponse({'updatedCount': count, 'version': _dataVersion});
+    }));
+
+    router.post('/api/delete', (Request req) => _guarded(req, (s, body) async {
+      final table = body['table'] as String? ?? '';
+      final where = body['where'] as String?;
+
+      final denied = _checkWrite(s, table, 'delete', where: where);
+      if (denied != null) return denied;
+
+      final db = await _dbHelper.database;
+      final count = await db.delete(
+        table,
+        where: where,
+        whereArgs: _args(body['args']),
+      );
+      if (count > 0) await _afterWrite();
+      return _jsonResponse({'deletedCount': count, 'version': _dataVersion});
+    }));
+
+    router.post('/api/raw-query', (Request req) => _guarded(req, (s, body) async {
+      final sql = body['sql'] as String? ?? '';
+      if (!sql.trim().toUpperCase().startsWith('SELECT')) {
+        return _jsonResponse(
+          {'error': 'Only SELECT queries allowed'},
+          status: 403,
+        );
+      }
+      final denied = _checkFragments(s, [sql]);
+      if (denied != null) return denied;
+
+      final db = await _dbHelper.database;
+      final rows = await db.rawQuery(sql, _args(body['args']));
+      return _jsonResponse({
+        'rows': _sanitizeRows(rows),
+        'version': _dataVersion,
+      });
+    }));
+
+    router.post('/api/batch', (Request req) => _guarded(req, (s, body) async {
+      final ops = body['operations'];
+      if (ops is! List) {
+        return _jsonResponse({'error': 'operations must be a list'}, status: 400);
+      }
+      if (ops.length > 500) {
+        return _jsonResponse({'error': 'Too many operations.'}, status: 400);
+      }
+
+      final parsed = <Map<String, dynamic>>[];
+      for (final raw in ops) {
+        if (raw is! Map) {
+          return _jsonResponse({'error': 'Invalid operation.'}, status: 400);
+        }
+        final op = Map<String, dynamic>.from(raw);
+        final type = op['type'] as String? ?? '';
+        final table = op['table'] as String? ?? '';
+        final data = _dataMap(op['data']);
+        final where = op['where'] as String?;
+
+        final denied = _checkWrite(
+          s,
+          table,
+          type,
+          data: type == 'delete' ? null : data,
+          where: where,
+        );
+        if (denied != null) return denied;
+        parsed.add({
+          'type': type,
+          'table': table,
+          'data': data,
+          'where': where,
+          'args': _args(op['args']),
+        });
+      }
+
+      final db = await _dbHelper.database;
+      await db.transaction((txn) async {
+        final batch = txn.batch();
+        for (final op in parsed) {
+          final table = op['table'] as String;
+          switch (op['type']) {
+            case 'insert':
+              batch.insert(table, op['data'] as Map<String, dynamic>);
+              break;
+            case 'update':
+              batch.update(
+                table,
+                op['data'] as Map<String, dynamic>,
+                where: op['where'] as String?,
+                whereArgs: op['args'] as List<dynamic>?,
+              );
+              break;
+            case 'delete':
+              batch.delete(
+                table,
+                where: op['where'] as String?,
+                whereArgs: op['args'] as List<dynamic>?,
+              );
+              break;
+          }
+        }
+        await batch.commit(noResult: true);
+      });
+
+      if (parsed.isNotEmpty) await _afterWrite();
+      return _jsonResponse({
+        'status': 'ok',
+        'count': parsed.length,
+        'version': _dataVersion,
+      });
+    }));
+
+    // ── NEW ATOMIC MUTATION ENDPOINTS ──
+
+    // 1. Point of Sale checkout
+    router.post('/api/sales/complete', (Request req) => _guarded(req, (s, body) async {
+      if (!s.has('sales.add')) {
+        return _jsonResponse(
+          {'error': 'Permission denied: you cannot create sales.'},
+          status: 403,
+        );
+      }
+      final db = await _dbHelper.database;
+      await SaleTransaction.run(db, body);
+      await _afterWrite();
+      return _jsonResponse({'status': 'ok', 'version': _dataVersion});
+    }));
+
+    // 2. Receive Purchases
+    router.post('/api/purchases/complete', (Request req) => _guarded(req, (s, body) async {
+      if (!s.has('purchases.add')) {
+        return _jsonResponse(
+          {'error': 'Permission denied: you cannot register purchases.'},
+          status: 403,
+        );
+      }
+      final db = await _dbHelper.database;
+      await PurchaseTransaction.run(db, body);
+      await _afterWrite();
+      return _jsonResponse({'status': 'ok', 'version': _dataVersion});
+    }));
+
+    // 3. Complete Sales Returns
+    router.post('/api/returns/sales/complete', (Request req) => _guarded(req, (s, body) async {
+      if (!s.hasAny(['sales.returnAction', 'sales.manage'])) {
+        return _jsonResponse(
+          {'error': 'Permission denied: you cannot handle sales returns.'},
+          status: 403,
+        );
+      }
+      final db = await _dbHelper.database;
+      await SalesReturnTransaction.run(db, body);
+      await _afterWrite();
+      return _jsonResponse({'status': 'ok', 'version': _dataVersion});
+    }));
+
+    // 4. Complete Purchase Returns
+    router.post('/api/returns/purchases/complete', (Request req) => _guarded(req, (s, body) async {
+      if (!s.hasAny(['purchases.returnAction', 'purchases.manage'])) {
+        return _jsonResponse(
+          {'error': 'Permission denied: you cannot handle purchase returns.'},
+          status: 403,
+        );
+      }
+      final db = await _dbHelper.database;
+      await PurchaseReturnTransaction.run(db, body);
+      await _afterWrite();
+      return _jsonResponse({'status': 'ok', 'version': _dataVersion});
+    }));
+
+    // 5. Atomic Stock Adjustments
+    router.post('/api/inventory/adjust', (Request req) => _guarded(req, (s, body) async {
+      if (!s.hasAny(['inventory.adjust', 'inventory.manage'])) {
+        return _jsonResponse(
+          {'error': 'Permission denied: you cannot adjust inventory levels.'},
+          status: 403,
+        );
+      }
+      final db = await _dbHelper.database;
+      await StockAdjustmentTransaction.run(db, body);
+      await _afterWrite();
+      return _jsonResponse({'status': 'ok', 'version': _dataVersion});
+    }));
+
+    // 6. Record Customer Payments
+    router.post('/api/payments/customer', (Request req) => _guarded(req, (s, body) async {
+      if (!s.hasAny(['customers.edit', 'accounts.manage'])) {
+        return _jsonResponse(
+          {'error': 'Permission denied: you cannot post customer payments.'},
+          status: 403,
+        );
+      }
+      final db = await _dbHelper.database;
+      await CustomerPaymentTransaction.run(db, body);
+      await _afterWrite();
+      return _jsonResponse({'status': 'ok', 'version': _dataVersion});
+    }));
+
+    // 7. Record Supplier Payments
+    router.post('/api/payments/supplier', (Request req) => _guarded(req, (s, body) async {
+      if (!s.hasAny(['suppliers.edit', 'accounts.manage'])) {
+        return _jsonResponse(
+          {'error': 'Permission denied: you cannot post supplier payments.'},
+          status: 403,
+        );
+      }
+      final db = await _dbHelper.database;
+      await SupplierPaymentTransaction.run(db, body);
+      await _afterWrite();
+      return _jsonResponse({'status': 'ok', 'version': _dataVersion});
+    }));
+
+    // 8. Register Expenses
+    router.post('/api/expenses/complete', (Request req) => _guarded(req, (s, body) async {
+      if (!s.hasAny(['accounts.manage'])) {
+        return _jsonResponse(
+          {'error': 'Permission denied: you cannot ledger expenses.'},
+          status: 403,
+        );
+      }
+      final db = await _dbHelper.database;
+      await ExpenseTransaction.run(db, body);
+      await _afterWrite();
+      return _jsonResponse({'status': 'ok', 'version': _dataVersion});
+    }));
+
+    final handler = Pipeline()
+        .addMiddleware(_corsMiddleware())
+        .addMiddleware(logRequests())
+        .addHandler(router.call);
+
+    _server = await shelf_io.serve(handler, InternetAddress.anyIPv4, _port);
+    _tracker.startCleanup();
+
+    await _syncBaselineSilently();
+    _startWatcher();
+    _sessionTimer?.cancel();
+    _sessionTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      final now = DateTime.now();
+      _sessions.removeWhere(
+            (_, s) => now.difference(s.lastUsed) > _sessionIdleTimeout,
+      );
+      _failedLogins.removeWhere(
+            (_, f) => now.difference(f.first) > const Duration(minutes: 5),
+      );
+    });
+  }
+
+  Future<void> stop() async {
+    _tracker.stopCleanup();
+    _watchTimer?.cancel();
+    _watchTimer = null;
+    _sessionTimer?.cancel();
+    _sessionTimer = null;
+    _sessions.clear();
+    for (final w in List<Completer<void>>.from(_versionWaiters)) {
+      if (!w.isCompleted) w.complete();
+    }
+    _versionWaiters.clear();
+    await _server?.close(force: true);
+    _server = null;
+  }
+
+  Response _jsonResponse(Map<String, dynamic> data, {int status = 200}) {
+    return Response(
+      status,
+      body: jsonEncode(data),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+
+  Middleware _corsMiddleware() {
+    return (Handler innerHandler) {
+      return (Request request) async {
+        if (request.method == 'OPTIONS') {
+          return Response.ok('', headers: _corsHeaders);
+        }
+        final response = await innerHandler(request);
+        return response.change(headers: _corsHeaders);
+      };
+    };
+  }
+
+  static const _corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
+}
+
+class _FailedLogins {
+  final int count;
+  final DateTime first;
+  const _FailedLogins(this.count, this.first);
+}
+
+============================================================
+FILE: lib\features\authentication\data\http_auth_repository.dart
+============================================================
+
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import '../../../core/error/failures.dart';
+import '../../../core/network/api_client.dart';
+import '../../../core/network/network_config.dart';
+import '../../../core/result/result.dart';
+import '../../users/domain/role.dart';
+import '../domain/auth_repository.dart';
+import '../domain/user.dart';
+import 'sqlite_auth_repository.dart';
+
+/// Login for LAN client PCs.
+///
+/// Credentials are verified by the SERVER (`/api/login`), which returns a
+/// session token plus the user's role and permissions. The client no longer
+/// reads the `users` table, and a wrong password is never "retried" against
+/// the client's own local database.
+///
+/// The only exception: if the server cannot be reached at all, the local
+/// built-in administrator may sign in so network settings can be fixed.
+class HttpAuthRepository implements AuthRepository {
+  final ApiClient _api;
+  final SqliteAuthRepository _localFallback;
+  User? _currentUser;
+
+  HttpAuthRepository({
+    ApiClient? api,
+    SqliteAuthRepository? localFallback,
+  })  : _api = api ?? ApiClient.instance,
+        _localFallback = localFallback ?? SqliteAuthRepository();
+
+  static String _hashPassword(String password) {
+    final bytes = utf8.encode(password.trim());
+    return sha256.convert(bytes).toString();
+  }
+
+  @override
+  Future<Result<User>> login(String username, String password) async {
+    final serverIp = NetworkConfig.instance.serverIp.trim();
+
+    // Not configured yet: nothing to talk to, use the local database.
+    if (serverIp.isEmpty) {
+      _api.setToken(null);
+      final localRes = await _localFallback.login(username, password);
+      if (localRes.isSuccess) _currentUser = localRes.valueOrNull;
+      return localRes;
+    }
+
+    final result = await _api.login(
+      username: username.trim(),
+      passwordHash: _hashPassword(password),
+    );
+
+    return await result.fold(
+      onSuccess: (data) => _handleServerLogin(data),
+      onFailure: (f) => _handleServerFailure(f, username, password),
+    );
+  }
+
+  Future<Result<User>> _handleServerLogin(Map<String, dynamic> data) async {
+    try {
+      final u = Map<String, dynamic>.from(data['user'] as Map);
+      final roleId = u['roleId'] as String? ?? '';
+      final role = UserRole.fromRoleId(roleId);
+
+      final keys = (data['permissions'] as List? ?? const []).map((e) => e.toString());
+      final perms = permissionsFromRows(
+        keys.map((k) {
+          final parts = k.split('.');
+          return <String, dynamic>{
+            'category': parts.first,
+            'action': parts.length > 1 ? parts[1] : '',
+          };
+        }),
+      );
+
+      final user = User(
+        id: UserId(u['id'] as String),
+        username: u['username'] as String,
+        fullName: u['fullName'] as String,
+        email: '',
+        role: role,
+        roleId: roleId,
+        roleName: (u['roleName'] as String?) ?? role.label,
+        permissions: perms,
+      );
+
+      _currentUser = user;
+      return Success(user);
+    } catch (_) {
+      _api.setToken(null);
+      return const Failure(
+        ServerFailure(message: 'Unexpected response from the server.'),
+      );
+    }
+  }
+
+  Future<Result<User>> _handleServerFailure(
+      dynamic failure,
+      String username,
+      String password,
+      ) async {
+    // The server answered and said no (wrong password, inactive, locked...).
+    // Never fall back to the local database in that case.
+    if (failure is AuthenticationFailure) {
+      return Failure(failure);
+    }
+
+    // The server could not be reached. Allow ONLY the local administrator in,
+    // so the Server IP can be corrected in Network settings.
+    _api.setToken(null);
+    final localRes = await _localFallback.login(username, password);
+    if (localRes.isSuccess) {
+      final local = localRes.valueOrNull;
+      if (local != null && local.role == UserRole.admin) {
+        _currentUser = local;
+        return localRes;
+      }
+      await _localFallback.logout();
+    }
+    return const Failure(
+      ServerFailure(
+        message: 'Cannot reach the server. Check the Server IP, or sign in '
+            'as the administrator to change network settings.',
+      ),
+    );
+  }
+
+  @override
+  Future<Result<void>> logout() async {
+    _currentUser = null;
+    await _api.logout();
+    await _localFallback.logout();
+    return const Success(null);
+  }
+
+  @override
+  Future<Result<User?>> getCurrentSession() async {
+    if (_currentUser != null) return Success(_currentUser);
+    return await _localFallback.getCurrentSession();
+  }
+}
+
+============================================================
+FILE: lib\features\authentication\data\sqlite_auth_repository.dart
+============================================================
+
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import 'package:sqflite/sqflite.dart';
+import '../../../core/data/database_helper.dart';
+import '../../../core/error/failures.dart';
+import '../../../core/result/result.dart';
+import '../../users/domain/role.dart';
+import '../domain/auth_repository.dart';
+import '../domain/user.dart';
+
+/// Real SQLite authentication against the `users` + `roles` tables.
+class SqliteAuthRepository implements AuthRepository {
+  final DatabaseHelper _dbHelper;
+  User? _currentUser;
+
+  SqliteAuthRepository({DatabaseHelper? dbHelper})
+      : _dbHelper = dbHelper ?? DatabaseHelper.instance;
+
+  Future<Database> get _db => _dbHelper.database;
+
+  static String hashPassword(String password) {
+    final bytes = utf8.encode(password);
+    return sha256.convert(bytes).toString();
+  }
+
+  @override
+  Future<Result<User>> login(String username, String password) async {
+    try {
+      final db = await _db;
+      final hash = hashPassword(password.trim());
+
+      final rows = await db.rawQuery('''
+        SELECT u.*, r.name AS role_name
+        FROM users u
+        LEFT JOIN roles r ON u.role_id = r.id
+        WHERE LOWER(u.username) = LOWER(?)
+        LIMIT 1
+      ''', [username.trim()]);
+
+      if (rows.isEmpty) {
+        return const Failure(
+          AuthenticationFailure(message: 'Invalid username or password.'),
+        );
+      }
+
+      final row = rows.first;
+      final status = row['status'] as String? ?? 'active';
+      final storedHash = row['password_hash'] as String? ?? '';
+
+      if (status == 'inactive') {
+        return const Failure(
+          AuthenticationFailure(message: 'This account is inactive. Contact an administrator.'),
+        );
+      }
+      if (status == 'locked') {
+        return const Failure(
+          AuthenticationFailure(message: 'This account is locked. Contact an administrator.'),
+        );
+      }
+
+      if (storedHash != hash) {
+        return const Failure(
+          AuthenticationFailure(message: 'Invalid username or password.'),
+        );
+      }
+
+      // Update last login
+      await db.update(
+        'users',
+        {
+          'last_login_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+
+      final roleId = row['role_id'] as String? ?? '';
+      final role = UserRole.fromRoleId(roleId);
+
+      final permRows = await db.query(
+        'role_permissions',
+        where: 'role_id = ?',
+        whereArgs: [roleId],
+      );
+
+      final user = User(
+        id: UserId(row['id'] as String),
+        username: row['username'] as String,
+        fullName: row['full_name'] as String,
+        email: '',
+        role: role,
+        roleId: roleId,
+        roleName: row['role_name'] as String? ?? role.label,
+        permissions: permissionsFromRows(permRows),
+      );
+
+      _currentUser = user;
+      return Success(user);
+    } catch (e) {
+      return Failure(
+        DatabaseFailure(message: 'Login failed: $e'),
+      );
+    }
+  }
+
+  @override
+  Future<Result<void>> logout() async {
+    _currentUser = null;
+    return const Success(null);
+  }
+
+  @override
+  Future<Result<User?>> getCurrentSession() async {
+    return Success(_currentUser);
+  }
+}
+
+============================================================
+FILE: lib\features\users\data\sqlite_user_repository.dart
+============================================================
+
+import 'package:sqflite/sqflite.dart';
+import '../../../core/data/database_helper.dart';
+import '../../../core/error/failures.dart';
+import '../../../core/result/result.dart';
+import '../domain/app_user.dart';
+import '../domain/role.dart';
+import '../domain/user_repository.dart';
+
+class SqliteUserRepository implements UserRepository {
+  final DatabaseHelper _dbHelper;
+
+  SqliteUserRepository({DatabaseHelper? dbHelper})
+    : _dbHelper = dbHelper ?? DatabaseHelper.instance;
+
+  Future<Database> get _db => _dbHelper.database;
+
+  AppUser _rowToUser(Map<String, dynamic> r) {
+    return AppUser(
+      id: AppUserId(r['id'] as String),
+      fullName: r['full_name'] as String,
+      username: r['username'] as String,
+      phone: r['phone'] as String? ?? '',
+      roleId: r['role_id'] as String,
+      roleName: r['role_name'] as String? ?? '',
+      status: UserStatus.values.firstWhere(
+        (e) => e.name == r['status'],
+        orElse: () => UserStatus.active,
+      ),
+      passwordHash: r['password_hash'] as String? ?? '',
+      lastLoginAt: r['last_login_at'] != null
+          ? DateTime.parse(r['last_login_at'] as String)
+          : null,
+      createdAt: DateTime.parse(r['created_at'] as String),
+      updatedAt: DateTime.parse(r['updated_at'] as String),
+    );
+  }
+
+  @override
+  Future<Result<List<AppUser>>> getUsers({String? searchQuery}) async {
+    try {
+      final db = await _db;
+      String? where;
+      List<dynamic>? args;
+
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        where = 'full_name LIKE ? OR username LIKE ? OR phone LIKE ?';
+        final q = '%$searchQuery%';
+        args = [q, q, q];
+      }
+
+      final rows = await db.rawQuery('''
+        SELECT u.*, r.name AS role_name
+        FROM users u
+        LEFT JOIN roles r ON u.role_id = r.id
+        ${where != null ? 'WHERE $where' : ''}
+        ORDER BY u.full_name ASC
+      ''', args ?? []);
+
+      return Success(rows.map(_rowToUser).toList());
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load users: $e'));
+    }
+  }
+
+  @override
+  Future<Result<AppUser>> getUserById(AppUserId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.rawQuery(
+        '''
+        SELECT u.*, r.name AS role_name
+        FROM users u
+        LEFT JOIN roles r ON u.role_id = r.id
+        WHERE u.id = ?
+      ''',
+        [id.value],
+      );
+      if (rows.isEmpty) {
+        return const Failure(NotFoundFailure(message: 'User not found.'));
+      }
+      return Success(_rowToUser(rows.first));
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load user: $e'));
+    }
+  }
+
+  @override
+  Future<Result<AppUser>> createUser(AppUser u) async {
+    try {
+      final db = await _db;
+      await db.insert('users', {
+        'id': u.id.value,
+        'full_name': u.fullName,
+        'username': u.username,
+        'phone': u.phone,
+        'role_id': u.roleId,
+        'status': u.status.name,
+        'password_hash': u.passwordHash,
+        'last_login_at': u.lastLoginAt?.toIso8601String(),
+        'created_at': u.createdAt.toIso8601String(),
+        'updated_at': u.updatedAt.toIso8601String(),
+      });
+      return Success(u);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to create user: $e'));
+    }
+  }
+
+  @override
+  Future<Result<AppUser>> updateUser(AppUser u) async {
+    try {
+      final db = await _db;
+      final rows = await db.update(
+        'users',
+        {
+          'full_name': u.fullName,
+          'username': u.username,
+          'phone': u.phone,
+          'role_id': u.roleId,
+          'status': u.status.name,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [u.id.value],
+      );
+      if (rows == 0) {
+        return const Failure(NotFoundFailure(message: 'User not found.'));
+      }
+      return Success(u);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to update user: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> updateUserStatus(AppUserId id, UserStatus status) async {
+    try {
+      final db = await _db;
+      await db.update(
+        'users',
+        {'status': status.name, 'updated_at': DateTime.now().toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [id.value],
+      );
+      return const Success(null);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to update status: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> updatePassword(
+    AppUserId id,
+    String newPasswordHash,
+  ) async {
+    try {
+      final db = await _db;
+      await db.update(
+        'users',
+        {
+          'password_hash': newPasswordHash,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [id.value],
+      );
+      return const Success(null);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to update password: $e'));
+    }
+  }
+
+  // ─── ROLES ──────────────────────────────────────────────────
+
+  Role _rowToRole(Map<String, dynamic> r, Set<Permission> perms) {
+    return Role(
+      id: RoleId(r['id'] as String),
+      name: r['name'] as String,
+      description: r['description'] as String? ?? '',
+      isBuiltIn: (r['is_built_in'] as int? ?? 0) == 1,
+      permissions: perms,
+      createdAt: DateTime.parse(r['created_at'] as String),
+    );
+  }
+
+  Future<Set<Permission>> _loadPermissions(Database db, String roleId) async {
+    final rows = await db.query(
+      'role_permissions',
+      where: 'role_id = ?',
+      whereArgs: [roleId],
+    );
+    return rows.map((r) {
+      final cat = PermissionCategory.values.firstWhere(
+        (e) => e.name == r['category'],
+        orElse: () => PermissionCategory.dashboard,
+      );
+      final act = PermissionAction.values.firstWhere(
+        (e) => e.name == r['action'],
+        orElse: () => PermissionAction.view,
+      );
+      return Permission(cat, act);
+    }).toSet();
+  }
+
+  @override
+  Future<Result<List<Role>>> getRoles() async {
+    try {
+      final db = await _db;
+      final rows = await db.query('roles', orderBy: 'name ASC');
+      final roles = <Role>[];
+      for (final r in rows) {
+        final perms = await _loadPermissions(db, r['id'] as String);
+        roles.add(_rowToRole(r, perms));
+      }
+      return Success(roles);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load roles: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Role>> getRoleById(RoleId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'roles',
+        where: 'id = ?',
+        whereArgs: [id.value],
+      );
+      if (rows.isEmpty) {
+        return const Failure(NotFoundFailure(message: 'Role not found.'));
+      }
+      final perms = await _loadPermissions(db, id.value);
+      return Success(_rowToRole(rows.first, perms));
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load role: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Role>> createRole(Role role) async {
+    try {
+      final db = await _db;
+      await db.transaction((txn) async {
+        await txn.insert('roles', {
+          'id': role.id.value,
+          'name': role.name,
+          'description': role.description,
+          'is_built_in': role.isBuiltIn ? 1 : 0,
+          'created_at': role.createdAt.toIso8601String(),
+        });
+        for (final p in role.permissions) {
+          await txn.insert('role_permissions', {
+            'role_id': role.id.value,
+            'category': p.category.name,
+            'action': p.action.name,
+          });
+        }
+      });
+      return Success(role);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to create role: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Role>> updateRole(Role role) async {
+    try {
+      final db = await _db;
+      await db.transaction((txn) async {
+        await txn.update(
+          'roles',
+          {'name': role.name, 'description': role.description},
+          where: 'id = ?',
+          whereArgs: [role.id.value],
+        );
+        await txn.delete(
+          'role_permissions',
+          where: 'role_id = ?',
+          whereArgs: [role.id.value],
+        );
+        for (final p in role.permissions) {
+          await txn.insert('role_permissions', {
+            'role_id': role.id.value,
+            'category': p.category.name,
+            'action': p.action.name,
+          });
+        }
+      });
+      return Success(role);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to update role: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> deleteRole(RoleId id) async {
+    try {
+      final db = await _db;
+      final roleRows = await db.query(
+        'roles',
+        where: 'id = ?',
+        whereArgs: [id.value],
+      );
+      if (roleRows.isNotEmpty &&
+          (roleRows.first['is_built_in'] as int? ?? 0) == 1) {
+        return const Failure(
+          ValidationFailure(message: 'Cannot delete a built-in role.'),
+        );
+      }
+      await db.transaction((txn) async {
+        await txn.delete(
+          'role_permissions',
+          where: 'role_id = ?',
+          whereArgs: [id.value],
+        );
+        await txn.delete('roles', where: 'id = ?', whereArgs: [id.value]);
+      });
+      return const Success(null);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to delete role: $e'));
+    }
+  }
+}
+
+============================================================
+FILE: lib\features\authentication\presentation\controllers\auth_controller.dart
+============================================================
+
+import 'package:flutter/material.dart';
+import '../../domain/user.dart';
+import '../../domain/auth_repository.dart';
+import '../../application/login_use_case.dart';
+
+class AuthController extends ChangeNotifier {
+  final AuthRepository _authRepository;
+  final LoginUseCase _loginUseCase;
+
+  AuthController({
+    required AuthRepository authRepository,
+  })  : _authRepository = authRepository,
+        _loginUseCase = LoginUseCase(authRepository);
+
+  User? _currentUser;
+  bool _isLoading = false;
+  String? _errorMessage;
+
+  User? get currentUser => _currentUser;
+  bool get isAuthenticated => _currentUser != null;
+  bool get isLoading => _isLoading;
+  String? get errorMessage => _errorMessage;
+
+  /// True when the user may manage users/roles (permission driven).
+  bool get isAdmin => _currentUser?.canManageUsers ?? false;
+
+  Future<bool> login(String username, String password) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    final result = await _loginUseCase.execute(username, password);
+
+    _isLoading = false;
+    return result.fold(
+      onSuccess: (user) {
+        _currentUser = user;
+        notifyListeners();
+        return true;
+      },
+      onFailure: (failure) {
+        _errorMessage = failure.message;
+        notifyListeners();
+        return false;
+      },
+    );
+  }
+
+  Future<void> logout() async {
+    _isLoading = true;
+    notifyListeners();
+
+    await _authRepository.logout();
+
+    _currentUser = null;
+    _isLoading = false;
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  void clearError() {
+    if (_errorMessage != null) {
+      _errorMessage = null;
+      notifyListeners();
+    }
+  }
+}
+
+============================================================
+FILE: lib\core\network\network_config.dart
+============================================================
+
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+
+enum AppMode {
+  standalone('Standalone (Single PC)'),
+  server('Server (Main PC)'),
+  client('Client (Connected PC)');
+
+  final String label;
+  const AppMode(this.label);
+}
+
+class NetworkConfig extends ChangeNotifier {
+  NetworkConfig._();
+  static final NetworkConfig instance = NetworkConfig._();
+
+  AppMode _mode = AppMode.standalone;
+  String _serverIp = '';
+  int _port = 8080;
+  String _pcName = '';
+  bool _autoStartServer = false;
+
+  AppMode get mode => _mode;
+  String get serverIp => _serverIp;
+  int get port => _port;
+  String get pcName => _pcName;
+  bool get autoStartServer => _autoStartServer;
+
+  bool get isStandalone => _mode == AppMode.standalone;
+  bool get isServer => _mode == AppMode.server;
+  bool get isClient => _mode == AppMode.client;
+
+  String get baseUrl => 'http://$_serverIp:$_port';
+
+  Future<String> detectLocalIp() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+      );
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (!addr.isLoopback && !addr.address.startsWith('127.')) {
+            return addr.address;
+          }
+        }
+      }
+    } catch (_) {}
+    return '127.0.0.1';
+  }
+
+  void loadFromSettings(Map<String, String> settings) {
+    final modeStr = settings['network_mode'] ?? 'standalone';
+    _mode = AppMode.values.firstWhere(
+          (e) => e.name == modeStr,
+      orElse: () => AppMode.standalone,
+    );
+    _serverIp = settings['network_server_ip'] ?? '';
+    _port = int.tryParse(settings['network_port'] ?? '8080') ?? 8080;
+    _pcName = settings['network_pc_name'] ?? '';
+    _autoStartServer = settings['network_auto_start'] == 'true';
+    notifyListeners();
+  }
+
+  Map<String, String> toSettingsMap() {
+    return {
+      'network_mode': _mode.name,
+      'network_server_ip': _serverIp,
+      'network_port': _port.toString(),
+      'network_pc_name': _pcName,
+      'network_auto_start': _autoStartServer.toString(),
+    };
+  }
+
+  void update({
+    AppMode? mode,
+    String? serverIp,
+    int? port,
+    String? pcName,
+    bool? autoStartServer,
+  }) {
+    if (mode != null) _mode = mode;
+    if (serverIp != null) _serverIp = serverIp;
+    if (port != null) _port = port;
+    if (pcName != null) _pcName = pcName;
+    if (autoStartServer != null) _autoStartServer = autoStartServer;
+    notifyListeners();
+  }
+}

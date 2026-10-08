@@ -29,7 +29,6 @@ class AppShortcutScope extends StatelessWidget {
   Widget build(BuildContext context) {
     return Shortcuts(
       shortcuts: <ShortcutActivator, Intent>{
-        // Navigation (Alt + 1..0)
         reg.ShortcutRegistry.goToHome: const reg.NavigateHomeIntent(),
         reg.ShortcutRegistry.goToSales: const reg.NavigateSalesIntent(),
         reg.ShortcutRegistry.goToPurchases: const reg.NavigatePurchasesIntent(),
@@ -40,22 +39,19 @@ class AppShortcutScope extends StatelessWidget {
         reg.ShortcutRegistry.goToAccounts: const reg.NavigateAccountsIntent(),
         reg.ShortcutRegistry.goToReports: const reg.NavigateReportsIntent(),
         reg.ShortcutRegistry.goToMore: const reg.NavigateMoreIntent(),
-
-        // Global Actions (Ctrl + K / Cmd + K)
         reg.ShortcutRegistry.quickSearchCtrl: const reg.QuickSearchIntent(),
         reg.ShortcutRegistry.quickSearchCmd: const reg.QuickSearchIntent(),
         reg.ShortcutRegistry.toggleFullscreen: const reg.ToggleFullscreenIntent(),
         reg.ShortcutRegistry.dismiss: const reg.DismissIntent(),
-
-        // App-Level Navigation
-        reg.ShortcutRegistry.newSale: const reg.NewSaleIntent(),
-        reg.ShortcutRegistry.newPurchase: const reg.NewPurchaseIntent(),
-        reg.ShortcutRegistry.newMedicine: const reg.NewMedicineIntent(),
+        // Data-creating shortcuts are registered only when the callback is non-null
+        // (shell_screen passes null when the user lacks the permission).
+        if (onNewSale != null) reg.ShortcutRegistry.newSale: const reg.NewSaleIntent(),
+        if (onNewPurchase != null) reg.ShortcutRegistry.newPurchase: const reg.NewPurchaseIntent(),
+        if (onNewMedicine != null) reg.ShortcutRegistry.newMedicine: const reg.NewMedicineIntent(),
         reg.ShortcutRegistry.refreshData: const reg.RefreshDataIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
-          // Navigation
           reg.NavigateHomeIntent: CallbackAction<reg.NavigateHomeIntent>(
             onInvoke: (_) => onNavigateToTab?.call(0),
           ),
@@ -86,57 +82,29 @@ class AppShortcutScope extends StatelessWidget {
           reg.NavigateMoreIntent: CallbackAction<reg.NavigateMoreIntent>(
             onInvoke: (_) => onNavigateToTab?.call(9),
           ),
-
-          // Global Actions
           reg.QuickSearchIntent: CallbackAction<reg.QuickSearchIntent>(
-            onInvoke: (_) {
-              onQuickSearch?.call();
-              return null;
-            },
+            onInvoke: (_) { onQuickSearch?.call(); return null; },
           ),
           reg.ToggleFullscreenIntent: CallbackAction<reg.ToggleFullscreenIntent>(
-            onInvoke: (_) {
-              onToggleFullscreen?.call();
-              return null;
-            },
+            onInvoke: (_) { onToggleFullscreen?.call(); return null; },
           ),
           reg.DismissIntent: CallbackAction<reg.DismissIntent>(
-            onInvoke: (_) {
-              onDismiss?.call();
-              return null;
-            },
+            onInvoke: (_) { onDismiss?.call(); return null; },
           ),
-
-          // App-Level Navigation
           reg.NewSaleIntent: CallbackAction<reg.NewSaleIntent>(
-            onInvoke: (_) {
-              onNewSale?.call();
-              return null;
-            },
+            onInvoke: (_) { onNewSale?.call(); return null; },
           ),
           reg.NewPurchaseIntent: CallbackAction<reg.NewPurchaseIntent>(
-            onInvoke: (_) {
-              onNewPurchase?.call();
-              return null;
-            },
+            onInvoke: (_) { onNewPurchase?.call(); return null; },
           ),
           reg.NewMedicineIntent: CallbackAction<reg.NewMedicineIntent>(
-            onInvoke: (_) {
-              onNewMedicine?.call();
-              return null;
-            },
+            onInvoke: (_) { onNewMedicine?.call(); return null; },
           ),
           reg.RefreshDataIntent: CallbackAction<reg.RefreshDataIntent>(
-            onInvoke: (_) {
-              onRefreshData?.call();
-              return null;
-            },
+            onInvoke: (_) { onRefreshData?.call(); return null; },
           ),
         },
-        child: Focus(
-          autofocus: true,
-          child: child,
-        ),
+        child: Focus(autofocus: true, child: child),
       ),
     );
   }

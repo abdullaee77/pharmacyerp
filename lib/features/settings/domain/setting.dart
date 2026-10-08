@@ -4,7 +4,7 @@ enum SettingCategory {
   tax(label: 'Tax Configuration'),
   pos(label: 'POS Settings'),
   printer(label: 'Printer Settings'),
-  barcode(label: 'Barcode & Labels'),
+  network(label: 'Network & LAN'),
   notifications(label: 'Notifications'),
   backup(label: 'Backup & Data');
 

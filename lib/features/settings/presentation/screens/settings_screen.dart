@@ -4,26 +4,36 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../authentication/presentation/controllers/auth_controller.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/setting.dart';
 import '../controllers/settings_controller.dart';
 
 class SettingsScreen extends StatefulWidget {
   final SettingsController controller;
+  final AuthController authController;
 
-  const SettingsScreen({super.key, required this.controller});
+  const SettingsScreen({
+    super.key,
+    required this.controller,
+    required this.authController,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProviderStateMixin {
+class _SettingsScreenState extends State<SettingsScreen>
+    with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   final Map<String, TextEditingController> _controllers = {};
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: SettingCategory.values.length, vsync: this);
+    _tabController =
+        TabController(length: SettingCategory.values.length, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.controller.loadSettings();
     });
@@ -36,6 +46,9 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     super.dispose();
   }
 
+  bool get _canManage => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.settings, PermissionAction.manage);
+
   TextEditingController _ctrl(String key, String initial) {
     if (!_controllers.containsKey(key)) {
       _controllers[key] = TextEditingController(text: initial);
@@ -44,7 +57,8 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   }
 
   Future<void> _saveCategory(SettingCategory cat) async {
-    final catSettings = widget.controller.settings.where((s) => s.category == cat).toList();
+    final catSettings =
+    widget.controller.settings.where((s) => s.category == cat).toList();
     final values = <String, String>{};
     for (final s in catSettings) {
       final ctrl = _controllers[s.key];
@@ -52,8 +66,11 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     }
     final error = await widget.controller.saveSettings(values);
     if (!mounted) return;
-    if (error != null) AppToast.error(context, error);
-    else AppToast.success(context, 'Settings saved.');
+    if (error != null) {
+      AppToast.error(context, error);
+    } else {
+      AppToast.success(context, 'Settings saved.');
+    }
   }
 
   @override
@@ -67,7 +84,8 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              const Icon(Icons.settings_rounded, color: AppColors.primary, size: 28),
+              const Icon(Icons.settings_rounded,
+                  color: AppColors.primary, size: 28),
               const SizedBox(width: AppSpacing.md),
               Text('Settings', style: AppTypography.pageTitle),
             ]),
@@ -77,7 +95,8 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
               controller: _tabController,
               isScrollable: true,
               tabAlignment: TabAlignment.start,
-              tabs: SettingCategory.values.map((c) => Tab(text: c.label)).toList(),
+              tabs:
+              SettingCategory.values.map((c) => Tab(text: c.label)).toList(),
             ),
             const SizedBox(height: AppSpacing.lg),
 
@@ -87,7 +106,8 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   : TabBarView(
                 controller: _tabController,
                 children: SettingCategory.values.map((cat) {
-                  final catSettings = ctrl.settings.where((s) => s.category == cat).toList();
+                  final catSettings =
+                  ctrl.settings.where((s) => s.category == cat).toList();
                   return _buildCategoryTab(cat, catSettings);
                 }).toList(),
               ),
@@ -100,12 +120,14 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
 
   Widget _buildCategoryTab(SettingCategory cat, List<Setting> settings) {
     if (settings.isEmpty) {
-      return AppEmptyState(
+      return const AppEmptyState(
         icon: Icons.settings_outlined,
         title: 'No settings in this category',
         subtitle: 'Settings will appear here as they are configured.',
       );
     }
+
+    final readOnly = !_canManage;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.only(bottom: AppSpacing.huge),
@@ -122,7 +144,9 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(cat.label, style: AppTypography.sectionTitle.copyWith(color: AppColors.primary)),
+                Text(cat.label,
+                    style: AppTypography.sectionTitle
+                        .copyWith(color: AppColors.primary)),
                 const SizedBox(height: AppSpacing.lg),
                 ...settings.map((s) {
                   final isBool = s.value == 'true' || s.value == 'false';
@@ -131,20 +155,31 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                     child: isBool
                         ? SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: Text(s.label, style: AppTypography.subtitle.copyWith(fontSize: 14)),
+                      title: Text(s.label,
+                          style: AppTypography.subtitle
+                              .copyWith(fontSize: 14)),
                       subtitle: s.description != null
-                          ? Text(s.description!, style: AppTypography.caption)
+                          ? Text(s.description!,
+                          style: AppTypography.caption)
                           : null,
                       value: s.value == 'true',
-                      onChanged: (v) {
+                      onChanged: readOnly
+                          ? null
+                          : (v) {
                         _ctrl(s.key, s.value).text = v.toString();
                         setState(() {});
                       },
                     )
-                        : AppTextField(
-                      controller: _ctrl(s.key, s.value),
-                      label: s.label,
-                      hint: s.description ?? '',
+                        : IgnorePointer(
+                      ignoring: readOnly,
+                      child: Opacity(
+                        opacity: readOnly ? 0.6 : 1.0,
+                        child: AppTextField(
+                          controller: _ctrl(s.key, s.value),
+                          label: s.label,
+                          hint: s.description ?? '',
+                        ),
+                      ),
                     ),
                   );
                 }),
@@ -152,15 +187,16 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          Align(
-            alignment: Alignment.centerRight,
-            child: AppButton(
-              label: 'Save ${cat.label}',
-              icon: Icons.save_outlined,
-              variant: AppButtonVariant.primary,
-              onPressed: () => _saveCategory(cat),
+          if (_canManage)
+            Align(
+              alignment: Alignment.centerRight,
+              child: AppButton(
+                label: 'Save ${cat.label}',
+                icon: Icons.save_outlined,
+                variant: AppButtonVariant.primary,
+                onPressed: () => _saveCategory(cat),
+              ),
             ),
-          ),
         ],
       ),
     );

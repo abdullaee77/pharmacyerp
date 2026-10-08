@@ -1,9 +1,5 @@
 import '../../../core/error/failures.dart';
 import '../../../core/result/result.dart';
-import '../../accounts/application/account_use_cases.dart';
-import '../../accounts/domain/account.dart';
-import '../../accounts/domain/account_repository.dart';
-import '../../accounts/domain/financial_transaction.dart';
 import '../../medicines/domain/value_objects.dart';
 import '../domain/expense.dart';
 import '../domain/expense_repository.dart';
@@ -40,17 +36,14 @@ class GetExpenseCategoriesUseCase {
   Future<Result<List<ExpenseCategory>>> execute() => _repo.getCategories();
 }
 
-/// Creates an expense record and (if an account is linked) posts a transaction
-/// to the linked account's ledger (debit = account spent money).
 class CreateExpenseUseCase {
   final ExpenseRepository _repo;
-  final AccountRepository? _accountRepo;
 
   const CreateExpenseUseCase({
     required ExpenseRepository expenseRepository,
-    AccountRepository? accountRepository,
-  })  : _repo = expenseRepository,
-        _accountRepo = accountRepository;
+    // AccountRepository kept in signature to avoid breaking callers
+    dynamic accountRepository,
+  }) : _repo = expenseRepository;
 
   Future<Result<Expense>> execute(Expense expense) async {
     if (expense.description.trim().isEmpty) {
@@ -62,24 +55,9 @@ class CreateExpenseUseCase {
           ValidationFailure(message: 'Expense amount must be greater than zero.'));
     }
 
-    final saved = await _repo.createExpense(expense);
-    if (saved.isFailure) return saved;
-
-    // Post to account if linked
-    if (_accountRepo != null && expense.accountId != null) {
-      final poster = PostTransactionUseCase(_accountRepo!);
-      await poster.execute(
-        accountId: AccountId(expense.accountId!),
-        source: TransactionSource.expense,
-        description: '${expense.category}: ${expense.description}',
-        reference: expense.reference,
-        debit: Money.zero(),
-        credit: expense.amount, // Money leaving the account
-        operatorName: expense.operatorName,
-      );
-    }
-
-    return saved;
+    // The repository now handles expense insert + account debit in ONE
+    // atomic transaction, so there is no window for half-saved data.
+    return _repo.createExpense(expense);
   }
 }
 

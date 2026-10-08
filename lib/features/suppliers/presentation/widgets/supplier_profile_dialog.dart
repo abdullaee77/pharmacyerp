@@ -4,6 +4,9 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../authentication/domain/user.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/supplier.dart';
 import '../../domain/supplier_ledger.dart';
 import '../controllers/supplier_controller.dart';
@@ -13,14 +16,16 @@ class SupplierProfileDialog extends StatefulWidget {
   final SupplierController controller;
   final SupplierWithBalance supplier;
   final String operatorName;
-  final VoidCallback onEdit;
+  final User? user;
+  final VoidCallback? onEdit;
 
   const SupplierProfileDialog({
     super.key,
     required this.controller,
     required this.supplier,
     required this.operatorName,
-    required this.onEdit,
+    this.user,
+    this.onEdit,
   });
 
   @override
@@ -36,9 +41,13 @@ class _SupplierProfileDialogState extends State<SupplierProfileDialog> {
     });
   }
 
+  // Pay Supplier is a supplier-ledger write. Treat it as suppliers.add.
+  bool get _canPay => PermissionGate.allow(
+      widget.user, PermissionCategory.suppliers, PermissionAction.add);
+
   Future<void> _openPayment() async {
     final latest = widget.controller.suppliers.firstWhere(
-      (s) => s.supplier.id == widget.supplier.supplier.id,
+          (s) => s.supplier.id == widget.supplier.supplier.id,
       orElse: () => widget.supplier,
     );
 
@@ -71,7 +80,7 @@ class _SupplierProfileDialogState extends State<SupplierProfileDialog> {
       listenable: widget.controller,
       builder: (context, _) {
         final latest = widget.controller.suppliers.firstWhere(
-          (s) => s.supplier.id == widget.supplier.supplier.id,
+              (s) => s.supplier.id == widget.supplier.supplier.id,
           orElse: () => widget.supplier,
         );
         final s = latest.supplier;
@@ -104,7 +113,8 @@ class _SupplierProfileDialogState extends State<SupplierProfileDialog> {
                           children: [
                             Row(
                               children: [
-                                Text(s.name, style: AppTypography.sectionTitle),
+                                Text(s.name,
+                                    style: AppTypography.sectionTitle),
                                 const SizedBox(width: 8),
                                 AppBadge(
                                   label: s.status.label,
@@ -127,21 +137,24 @@ class _SupplierProfileDialogState extends State<SupplierProfileDialog> {
                           ],
                         ),
                       ),
-                      AppButton(
-                        label: 'Pay Supplier',
-                        icon: Icons.payments_rounded,
-                        variant: AppButtonVariant.success,
-                        size: AppButtonSize.small,
-                        onPressed: _openPayment,
-                      ),
-                      const SizedBox(width: 8),
-                      AppButton(
-                        label: 'Edit',
-                        icon: Icons.edit_outlined,
-                        variant: AppButtonVariant.outlined,
-                        size: AppButtonSize.small,
-                        onPressed: widget.onEdit,
-                      ),
+                      if (_canPay)
+                        AppButton(
+                          label: 'Pay Supplier',
+                          icon: Icons.payments_rounded,
+                          variant: AppButtonVariant.success,
+                          size: AppButtonSize.small,
+                          onPressed: _openPayment,
+                        ),
+                      if (widget.onEdit != null) ...[
+                        const SizedBox(width: 8),
+                        AppButton(
+                          label: 'Edit',
+                          icon: Icons.edit_outlined,
+                          variant: AppButtonVariant.outlined,
+                          size: AppButtonSize.small,
+                          onPressed: widget.onEdit,
+                        ),
+                      ],
                       const SizedBox(width: 8),
                       IconButton(
                         icon: const Icon(Icons.close_rounded, size: 20),

@@ -4,14 +4,21 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../authentication/presentation/controllers/auth_controller.dart';
 import '../../domain/role.dart';
 import '../controllers/user_controller.dart';
 import '../widgets/role_form_dialog.dart';
 
 class RolesScreen extends StatefulWidget {
   final UserController controller;
+  final AuthController authController;
 
-  const RolesScreen({super.key, required this.controller});
+  const RolesScreen({
+    super.key,
+    required this.controller,
+    required this.authController,
+  });
 
   @override
   State<RolesScreen> createState() => _RolesScreenState();
@@ -22,9 +29,13 @@ class _RolesScreenState extends State<RolesScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback(
-      (_) => widget.controller.loadRoles(),
+          (_) => widget.controller.loadRoles(),
     );
   }
+
+  // Only users.manage can touch roles — matches Permission Mapping.
+  bool get _canManage => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.users, PermissionAction.manage);
 
   Future<void> _addRole() async {
     final error = await showDialog<String>(
@@ -32,10 +43,11 @@ class _RolesScreenState extends State<RolesScreen> {
       builder: (ctx) => RoleFormDialog(controller: widget.controller),
     );
     if (!mounted) return;
-    if (error != null)
+    if (error != null) {
       AppToast.error(context, error);
-    else
+    } else {
       AppToast.success(context, 'Role created.');
+    }
   }
 
   Future<void> _editRole(Role role) async {
@@ -45,10 +57,11 @@ class _RolesScreenState extends State<RolesScreen> {
           RoleFormDialog(controller: widget.controller, existing: role),
     );
     if (!mounted) return;
-    if (error != null)
+    if (error != null) {
       AppToast.error(context, error);
-    else
+    } else {
       AppToast.success(context, 'Role updated.');
+    }
   }
 
   Future<void> _deleteRole(Role role) async {
@@ -65,10 +78,11 @@ class _RolesScreenState extends State<RolesScreen> {
     if (ok) {
       final error = await widget.controller.deleteRole(role.id);
       if (!mounted) return;
-      if (error != null)
+      if (error != null) {
         AppToast.error(context, error);
-      else
+      } else {
         AppToast.success(context, 'Role deleted.');
+      }
     }
   }
 
@@ -100,12 +114,13 @@ class _RolesScreenState extends State<RolesScreen> {
                   ],
                 ),
                 const Spacer(),
-                AppButton(
-                  label: 'Add Role',
-                  icon: Icons.add_rounded,
-                  variant: AppButtonVariant.primary,
-                  onPressed: _addRole,
-                ),
+                if (_canManage)
+                  AppButton(
+                    label: 'Add Role',
+                    icon: Icons.add_rounded,
+                    variant: AppButtonVariant.primary,
+                    onPressed: _addRole,
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -114,91 +129,92 @@ class _RolesScreenState extends State<RolesScreen> {
                   ? const AppLoading()
                   : ctrl.roles.isEmpty
                   ? const AppEmptyState(
-                      icon: Icons.admin_panel_settings_outlined,
-                      title: 'No roles defined',
-                      subtitle: 'Create a role to manage permissions.',
-                    )
+                icon: Icons.admin_panel_settings_outlined,
+                title: 'No roles defined',
+                subtitle: 'Create a role to manage permissions.',
+              )
                   : ListView.separated(
-                      itemCount: ctrl.roles.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: AppSpacing.md),
-                      itemBuilder: (ctx, i) {
-                        final role = ctrl.roles[i];
-                        final permCount = role.permissions.length;
-                        final totalPerms = Permission.all.length;
-                        return Container(
-                          decoration: BoxDecoration(
-                            color: AppColors.surface,
-                            borderRadius: BorderRadius.circular(AppRadius.lg),
-                            border: Border.all(color: AppColors.border),
+                itemCount: ctrl.roles.length,
+                separatorBuilder: (_, __) =>
+                const SizedBox(height: AppSpacing.md),
+                itemBuilder: (ctx, i) {
+                  final role = ctrl.roles[i];
+                  final permCount = role.permissions.length;
+                  final totalPerms = Permission.all.length;
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: AppColors.primarySurface,
+                          child: Text(
+                            role.name[0].toUpperCase(),
+                            style: AppTypography.sectionTitle.copyWith(
+                              color: AppColors.primary,
+                            ),
                           ),
-                          padding: const EdgeInsets.all(AppSpacing.lg),
-                          child: Row(
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              CircleAvatar(
-                                radius: 22,
-                                backgroundColor: AppColors.primarySurface,
-                                child: Text(
-                                  role.name[0].toUpperCase(),
-                                  style: AppTypography.sectionTitle.copyWith(
-                                    color: AppColors.primary,
+                              Row(
+                                children: [
+                                  Text(
+                                    role.name,
+                                    style: AppTypography.subtitle,
                                   ),
-                                ),
-                              ),
-                              const SizedBox(width: AppSpacing.md),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Text(
-                                          role.name,
-                                          style: AppTypography.subtitle,
-                                        ),
-                                        if (role.isBuiltIn) ...[
-                                          const SizedBox(width: 8),
-                                          const AppBadge(
-                                            label: 'Built-in',
-                                            variant: AppBadgeVariant.info,
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                    Text(
-                                      role.description.isEmpty
-                                          ? '$permCount of $totalPerms permissions'
-                                          : role.description,
-                                      style: AppTypography.caption,
+                                  if (role.isBuiltIn) ...[
+                                    const SizedBox(width: 8),
+                                    const AppBadge(
+                                      label: 'Built-in',
+                                      variant: AppBadgeVariant.info,
                                     ),
                                   ],
-                                ),
+                                ],
                               ),
-                              AppButton(
-                                label: 'Edit',
-                                icon: Icons.edit_outlined,
-                                variant: AppButtonVariant.outlined,
-                                size: AppButtonSize.small,
-                                onPressed: () => _editRole(role),
+                              Text(
+                                role.description.isEmpty
+                                    ? '$permCount of $totalPerms permissions'
+                                    : role.description,
+                                style: AppTypography.caption,
                               ),
-                              if (!role.isBuiltIn) ...[
-                                const SizedBox(width: 8),
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                    color: AppColors.error,
-                                    size: 18,
-                                  ),
-                                  tooltip: 'Delete',
-                                  splashRadius: 16,
-                                  onPressed: () => _deleteRole(role),
-                                ),
-                              ],
                             ],
                           ),
-                        );
-                      },
+                        ),
+                        if (_canManage)
+                          AppButton(
+                            label: 'Edit',
+                            icon: Icons.edit_outlined,
+                            variant: AppButtonVariant.outlined,
+                            size: AppButtonSize.small,
+                            onPressed: () => _editRole(role),
+                          ),
+                        if (!role.isBuiltIn && _canManage) ...[
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              color: AppColors.error,
+                              size: 18,
+                            ),
+                            tooltip: 'Delete',
+                            splashRadius: 16,
+                            onPressed: () => _deleteRole(role),
+                          ),
+                        ],
+                      ],
                     ),
+                  );
+                },
+              ),
             ),
           ],
         );

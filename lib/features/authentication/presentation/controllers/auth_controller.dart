@@ -21,9 +21,8 @@ class AuthController extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
-  bool get isAdmin =>
-      _currentUser?.role == UserRole.admin ||
-          _currentUser?.role == UserRole.manager;
+  /// True when the user may manage users/roles (permission driven).
+  bool get isAdmin => _currentUser?.canManageUsers ?? false;
 
   Future<bool> login(String username, String password) async {
     _isLoading = true;

@@ -4,7 +4,9 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
 import '../../../authentication/presentation/controllers/auth_controller.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/supplier.dart';
 import '../controllers/supplier_controller.dart';
 import '../widgets/supplier_form_dialog.dart';
@@ -32,6 +34,13 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
       widget.controller.loadSuppliers();
     });
   }
+
+  bool get _canAdd => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.suppliers, PermissionAction.add);
+  bool get _canEdit => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.suppliers, PermissionAction.edit);
+  bool get _canDelete => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.suppliers, PermissionAction.delete);
 
   Future<void> _addSupplier() async {
     final error = await showDialog<String>(
@@ -66,11 +75,15 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
       builder: (ctx) => SupplierProfileDialog(
         controller: widget.controller,
         supplier: swb,
-        operatorName: widget.authController.currentUser?.fullName ?? 'Operator',
-        onEdit: () {
+        operatorName:
+        widget.authController.currentUser?.fullName ?? 'Operator',
+        user: widget.authController.currentUser,
+        onEdit: _canEdit
+            ? () {
           Navigator.of(ctx).pop();
           _editSupplier(swb.supplier);
-        },
+        }
+            : null,
       ),
     );
   }
@@ -80,7 +93,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
       context,
       title: 'Delete Supplier?',
       message:
-          '"${s.name}" and all their ledger entries will be removed permanently.',
+      '"${s.name}" and all their ledger entries will be removed permanently.',
       confirmLabel: 'Delete',
     );
     if (ok) {
@@ -105,11 +118,8 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
           children: [
             Row(
               children: [
-                const Icon(
-                  Icons.local_shipping_rounded,
-                  color: AppColors.primary,
-                  size: 28,
-                ),
+                const Icon(Icons.local_shipping_rounded,
+                    color: AppColors.primary, size: 28),
                 const SizedBox(width: AppSpacing.md),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -122,12 +132,13 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
                   ],
                 ),
                 const Spacer(),
-                AppButton(
-                  label: 'Add Supplier',
-                  icon: Icons.add_business_outlined,
-                  variant: AppButtonVariant.primary,
-                  onPressed: _addSupplier,
-                ),
+                if (_canAdd)
+                  AppButton(
+                    label: 'Add Supplier',
+                    icon: Icons.add_business_outlined,
+                    variant: AppButtonVariant.primary,
+                    onPressed: _addSupplier,
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -145,8 +156,9 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
   }
 
   Widget _buildTable(SupplierController ctrl) {
-    if (ctrl.isLoading)
+    if (ctrl.isLoading) {
       return const AppLoading(message: 'Loading suppliers...');
+    }
     if (ctrl.error != null) {
       return AppEmptyState(
         icon: Icons.error_outline_rounded,
@@ -160,8 +172,8 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
         icon: Icons.local_shipping_outlined,
         title: 'No suppliers yet',
         subtitle: 'Add a supplier to track purchases and payments.',
-        actionLabel: 'Add Supplier',
-        onAction: _addSupplier,
+        actionLabel: _canAdd ? 'Add Supplier' : null,
+        onAction: _canAdd ? _addSupplier : null,
       );
     }
 
@@ -192,9 +204,8 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
             rows: ctrl.suppliers.map((swb) {
               final s = swb.supplier;
               final payable = swb.payable;
-              final payableColor = payable.paisa > 0
-                  ? AppColors.error
-                  : AppColors.textPrimary;
+              final payableColor =
+              payable.paisa > 0 ? AppColors.error : AppColors.textPrimary;
 
               return DataRow(
                 onSelectChanged: (_) => _openProfile(swb),
@@ -247,22 +258,24 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
                           splashRadius: 16,
                           onPressed: () => _openProfile(swb),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined, size: 16),
-                          tooltip: 'Edit',
-                          splashRadius: 16,
-                          onPressed: () => _editSupplier(s),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline_rounded,
-                            size: 16,
-                            color: AppColors.error,
+                        if (_canEdit)
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, size: 16),
+                            tooltip: 'Edit',
+                            splashRadius: 16,
+                            onPressed: () => _editSupplier(s),
                           ),
-                          tooltip: 'Delete',
-                          splashRadius: 16,
-                          onPressed: () => _deleteSupplier(s),
-                        ),
+                        if (_canDelete)
+                          IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              size: 16,
+                              color: AppColors.error,
+                            ),
+                            tooltip: 'Delete',
+                            splashRadius: 16,
+                            onPressed: () => _deleteSupplier(s),
+                          ),
                       ],
                     ),
                   ),

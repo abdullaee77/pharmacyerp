@@ -3,7 +3,10 @@ import '../../domain/navigation_item.dart';
 
 /// Presentation state controller for the application shell and navigation.
 class ShellController extends ChangeNotifier {
-  NavigationItem _selectedItem = NavigationItem.home;
+  ShellController({NavigationItem initialItem = NavigationItem.home})
+      : _selectedItem = initialItem;
+
+  NavigationItem _selectedItem;
   bool _isRibbonCollapsed = false;
   String _searchQuery = '';
 

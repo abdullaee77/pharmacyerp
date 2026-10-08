@@ -1,17 +1,29 @@
+// lib/features/users/presentation/screens/users_screen.dart
+
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../authentication/presentation/controllers/auth_controller.dart';
 import '../../domain/app_user.dart';
+import '../../domain/role.dart';
 import '../controllers/user_controller.dart';
 import '../widgets/user_form_dialog.dart';
 
 class UsersScreen extends StatefulWidget {
   final UserController controller;
+  final AuthController authController;
 
-  const UsersScreen({super.key, required this.controller});
+  const UsersScreen({
+    super.key,
+    required this.controller,
+    required this.authController,
+  });
 
   @override
   State<UsersScreen> createState() => _UsersScreenState();
@@ -27,16 +39,30 @@ class _UsersScreenState extends State<UsersScreen> {
     });
   }
 
+  // All user management collapses to users.manage per your mapping.
+  bool get _canManage => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.users, PermissionAction.manage);
+  bool get _canAdd => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.users, PermissionAction.add) ||
+      _canManage;
+  bool get _canEdit => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.users, PermissionAction.edit) ||
+      _canManage;
+  bool get _canDelete => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.users, PermissionAction.delete) ||
+      _canManage;
+
   Future<void> _addUser() async {
     final error = await showDialog<String>(
       context: context,
       builder: (ctx) => UserFormDialog(controller: widget.controller),
     );
     if (!mounted) return;
-    if (error != null)
+    if (error != null) {
       AppToast.error(context, error);
-    else
+    } else {
       AppToast.success(context, 'User created.');
+    }
   }
 
   Future<void> _editUser(AppUser u) async {
@@ -46,10 +72,11 @@ class _UsersScreenState extends State<UsersScreen> {
           UserFormDialog(controller: widget.controller, existing: u),
     );
     if (!mounted) return;
-    if (error != null)
+    if (error != null) {
       AppToast.error(context, error);
-    else
+    } else {
       AppToast.success(context, 'User updated.');
+    }
   }
 
   Future<void> _toggleStatus(AppUser u) async {
@@ -60,16 +87,17 @@ class _UsersScreenState extends State<UsersScreen> {
     final ok = await AppDialog.confirm(
       context,
       title:
-          '${newStatus == UserStatus.active ? 'Activate' : 'Deactivate'} User?',
+      '${newStatus == UserStatus.active ? 'Activate' : 'Deactivate'} User?',
       message: 'Are you sure you want to $label "${u.fullName}"?',
     );
     if (ok) {
       final error = await widget.controller.changeStatus(u.id, newStatus);
       if (!mounted) return;
-      if (error != null)
+      if (error != null) {
         AppToast.error(context, error);
-      else
+      } else {
         AppToast.success(context, 'User ${newStatus.label.toLowerCase()}.');
+      }
     }
   }
 
@@ -111,13 +139,18 @@ class _UsersScreenState extends State<UsersScreen> {
         ],
       ),
     );
-    if (confirmed == true && ctrl.text.isNotEmpty && mounted) {
-      final error = await widget.controller.resetPassword(u.id, ctrl.text);
+    if (confirmed == true && ctrl.text.trim().isNotEmpty && mounted) {
+      // Hash with SHA-256 before saving to the database so client login works
+      final bytes = utf8.encode(ctrl.text.trim());
+      final hash = sha256.convert(bytes).toString();
+
+      final error = await widget.controller.resetPassword(u.id, hash);
       if (!mounted) return;
-      if (error != null)
+      if (error != null) {
         AppToast.error(context, error);
-      else
+      } else {
         AppToast.success(context, 'Password reset successfully.');
+      }
     }
   }
 
@@ -149,12 +182,13 @@ class _UsersScreenState extends State<UsersScreen> {
                   ],
                 ),
                 const Spacer(),
-                AppButton(
-                  label: 'Add User',
-                  icon: Icons.person_add_outlined,
-                  variant: AppButtonVariant.primary,
-                  onPressed: _addUser,
-                ),
+                if (_canAdd)
+                  AppButton(
+                    label: 'Add User',
+                    icon: Icons.person_add_outlined,
+                    variant: AppButtonVariant.primary,
+                    onPressed: _addUser,
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -186,8 +220,8 @@ class _UsersScreenState extends State<UsersScreen> {
         icon: Icons.people_outline_rounded,
         title: 'No users found',
         subtitle: 'Add your first user to manage access.',
-        actionLabel: 'Add User',
-        onAction: _addUser,
+        actionLabel: _canAdd ? 'Add User' : null,
+        onAction: _canAdd ? _addUser : null,
       );
     }
 
@@ -268,34 +302,40 @@ class _UsersScreenState extends State<UsersScreen> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined, size: 16),
-                          tooltip: 'Edit',
-                          splashRadius: 16,
-                          onPressed: () => _editUser(u),
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            u.status == UserStatus.active
-                                ? Icons.block_rounded
-                                : Icons.check_circle_outline_rounded,
-                            size: 16,
-                            color: u.status == UserStatus.active
-                                ? AppColors.warning
-                                : AppColors.success,
+                        if (_canEdit)
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, size: 16),
+                            tooltip: 'Edit',
+                            splashRadius: 16,
+                            onPressed: () => _editUser(u),
                           ),
-                          tooltip: u.status == UserStatus.active
-                              ? 'Deactivate'
-                              : 'Activate',
-                          splashRadius: 16,
-                          onPressed: () => _toggleStatus(u),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.lock_reset_rounded, size: 16),
-                          tooltip: 'Reset Password',
-                          splashRadius: 16,
-                          onPressed: () => _resetPassword(u),
-                        ),
+                        // Toggle status is treated as "edit" since it mutates the user.
+                        if (_canEdit)
+                          IconButton(
+                            icon: Icon(
+                              u.status == UserStatus.active
+                                  ? Icons.block_rounded
+                                  : Icons.check_circle_outline_rounded,
+                              size: 16,
+                              color: u.status == UserStatus.active
+                                  ? AppColors.warning
+                                  : AppColors.success,
+                            ),
+                            tooltip: u.status == UserStatus.active
+                                ? 'Deactivate'
+                                : 'Activate',
+                            splashRadius: 16,
+                            onPressed: () => _toggleStatus(u),
+                          ),
+                        // Reset password requires users.manage (strongest).
+                        if (_canManage)
+                          IconButton(
+                            icon:
+                            const Icon(Icons.lock_reset_rounded, size: 16),
+                            tooltip: 'Reset Password',
+                            splashRadius: 16,
+                            onPressed: () => _resetPassword(u),
+                          ),
                       ],
                     ),
                   ),

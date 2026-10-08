@@ -1,13 +1,15 @@
+// lib/features/authentication/data/sqlite_auth_repository.dart
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 import '../../../core/data/database_helper.dart';
 import '../../../core/error/failures.dart';
 import '../../../core/result/result.dart';
+import '../../users/domain/role.dart';
 import '../domain/auth_repository.dart';
 import '../domain/user.dart';
 
-/// Real SQLite authentication against the `users` + `roles` tables.
+/// Real SQLite authentication against local users + roles tables.
 class SqliteAuthRepository implements AuthRepository {
   final DatabaseHelper _dbHelper;
   User? _currentUser;
@@ -18,7 +20,8 @@ class SqliteAuthRepository implements AuthRepository {
   Future<Database> get _db => _dbHelper.database;
 
   static String hashPassword(String password) {
-    final bytes = utf8.encode(password);
+    // Trim strictly before encoding to stay unified with HttpAuthRepository
+    final bytes = utf8.encode(password.trim());
     return sha256.convert(bytes).toString();
   }
 
@@ -26,7 +29,7 @@ class SqliteAuthRepository implements AuthRepository {
   Future<Result<User>> login(String username, String password) async {
     try {
       final db = await _db;
-      final hash = hashPassword(password.trim());
+      final hash = hashPassword(password);
 
       final rows = await db.rawQuery('''
         SELECT u.*, r.name AS role_name
@@ -46,12 +49,12 @@ class SqliteAuthRepository implements AuthRepository {
       final status = row['status'] as String? ?? 'active';
       final storedHash = row['password_hash'] as String? ?? '';
 
-      if (status == 'inactive') {
+      if (status.toLowerCase() == 'inactive') {
         return const Failure(
           AuthenticationFailure(message: 'This account is inactive. Contact an administrator.'),
         );
       }
-      if (status == 'locked') {
+      if (status.toLowerCase() == 'locked') {
         return const Failure(
           AuthenticationFailure(message: 'This account is locked. Contact an administrator.'),
         );
@@ -63,7 +66,6 @@ class SqliteAuthRepository implements AuthRepository {
         );
       }
 
-      // Update last login
       await db.update(
         'users',
         {
@@ -74,8 +76,14 @@ class SqliteAuthRepository implements AuthRepository {
         whereArgs: [row['id']],
       );
 
-      final roleName = (row['role_name'] as String? ?? 'Cashier').toLowerCase();
-      final role = _mapRole(roleName);
+      final roleId = row['role_id'] as String? ?? '';
+      final role = UserRole.fromRoleId(roleId);
+
+      final permRows = await db.query(
+        'role_permissions',
+        where: 'role_id = ?',
+        whereArgs: [roleId],
+      );
 
       final user = User(
         id: UserId(row['id'] as String),
@@ -83,8 +91,9 @@ class SqliteAuthRepository implements AuthRepository {
         fullName: row['full_name'] as String,
         email: '',
         role: role,
-        roleId: row['role_id'] as String? ?? '',
+        roleId: roleId,
         roleName: row['role_name'] as String? ?? role.label,
+        permissions: permissionsFromRows(permRows),
       );
 
       _currentUser = user;
@@ -94,13 +103,6 @@ class SqliteAuthRepository implements AuthRepository {
         DatabaseFailure(message: 'Login failed: $e'),
       );
     }
-  }
-
-  UserRole _mapRole(String roleName) {
-    if (roleName.contains('admin')) return UserRole.admin;
-    if (roleName.contains('manager')) return UserRole.manager;
-    if (roleName.contains('pharmacist')) return UserRole.pharmacist;
-    return UserRole.cashier;
   }
 
   @override

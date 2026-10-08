@@ -3,10 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:pharmacy/core/result/result.dart';
+import '../../../../core/network/network_config.dart';
+import '../../../authentication/domain/user.dart';
+import '../../../users/domain/role.dart';
 import '../../../medicines/data/sqlite_medicine_repository.dart';
+import '../../../medicines/data/http_medicine_repository.dart';
 import '../../../medicines/domain/medicine.dart';
+import '../../../medicines/domain/medicine_repository.dart';
 import '../../../customers/data/sqlite_customer_repository.dart';
+import '../../../customers/data/http_customer_repository.dart';
+import '../../../customers/domain/customer_repository.dart';
 import '../../../suppliers/data/sqlite_supplier_repository.dart';
+import '../../../suppliers/data/http_supplier_repository.dart';
+import '../../../suppliers/domain/supplier_repository.dart';
 
 enum GlobalSearchResultType { medicine, customer, supplier }
 
@@ -31,13 +40,20 @@ class GlobalSearchResultItem {
 }
 
 class GlobalSearchDialog extends StatefulWidget {
-  final SqliteMedicineRepository? medicineRepository;
-  final SqliteCustomerRepository? customerRepository;
-  final SqliteSupplierRepository? supplierRepository;
+  /// The logged-in user. Required so search never leaks data from modules
+  /// the user has no permission to open.
+  final User? user;
+
+  /// Optional overrides (e.g. for tests). When null, the dialog picks the
+  /// HTTP or SQLite repository itself based on the network mode.
+  final MedicineRepository? medicineRepository;
+  final CustomerRepository? customerRepository;
+  final SupplierRepository? supplierRepository;
   final ValueChanged<int>? onSelectTab;
 
   const GlobalSearchDialog({
     super.key,
+    required this.user,
     this.medicineRepository,
     this.customerRepository,
     this.supplierRepository,
@@ -60,14 +76,26 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
   Timer? _debounce;
   int _searchGeneration = 0;
 
-  SqliteMedicineRepository get _medicineRepo =>
-      widget.medicineRepository ?? SqliteMedicineRepository();
+  // Same selection rule as ShellScreen: clients read from the server over
+  // HTTP, standalone/server machines read their own SQLite database.
+  late final MedicineRepository _medicineRepo = widget.medicineRepository ??
+      (NetworkConfig.instance.isClient
+          ? HttpMedicineRepository()
+          : SqliteMedicineRepository());
 
-  SqliteCustomerRepository get _customerRepo =>
-      widget.customerRepository ?? SqliteCustomerRepository();
+  late final CustomerRepository _customerRepo = widget.customerRepository ??
+      (NetworkConfig.instance.isClient
+          ? HttpCustomerRepository()
+          : SqliteCustomerRepository());
 
-  SqliteSupplierRepository get _supplierRepo =>
-      widget.supplierRepository ?? SqliteSupplierRepository();
+  late final SupplierRepository _supplierRepo = widget.supplierRepository ??
+      (NetworkConfig.instance.isClient
+          ? HttpSupplierRepository()
+          : SqliteSupplierRepository());
+
+  /// A null user (should never happen) is denied everything.
+  bool _canSearch(PermissionCategory category) =>
+      widget.user?.hasAnyIn(category) ?? false;
 
   @override
   void initState() {
@@ -144,190 +172,196 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
     final List<GlobalSearchResultItem> items = [];
 
     // ── 1. Search Medicines ──
-    try {
-      final medResult = await _medicineRepo.getMedicines();
-      if (generation == _searchGeneration) {
-        final medicines = _unwrapResult(medResult);
+    if (_canSearch(PermissionCategory.medicines)) {
+      try {
+        final medResult = await _medicineRepo.getMedicines();
+        if (generation == _searchGeneration) {
+          final medicines = _unwrapResult(medResult);
 
-        for (final dynamic m in medicines) {
-          if (m == null) continue;
+          for (final dynamic m in medicines) {
+            if (m == null) continue;
 
-          String name = '';
-          try { name = m.name; } catch (_) {}
+            String name = '';
+            try { name = m.name; } catch (_) {}
 
-          String generic = '';
-          try { generic = m.genericName; } catch (_) {}
+            String generic = '';
+            try { generic = m.genericName; } catch (_) {}
 
-          String manufacturer = '';
-          try { manufacturer = m.manufacturer; } catch (_) {}
+            String manufacturer = '';
+            try { manufacturer = m.manufacturer; } catch (_) {}
 
-          String barcode = '';
-          try { barcode = _safeString(m.barcode); } catch (_) {}
+            String barcode = '';
+            try { barcode = _safeString(m.barcode); } catch (_) {}
 
-          String rack = '';
-          try { rack = m.rackLocation; } catch (_) {}
+            String rack = '';
+            try { rack = m.rackLocation; } catch (_) {}
 
-          String strength = '';
-          try { strength = m.strength; } catch (_) {}
+            String strength = '';
+            try { strength = m.strength; } catch (_) {}
 
-          String category = '';
-          try { category = m.category; } catch (_) {}
+            String category = '';
+            try { category = m.category; } catch (_) {}
 
-          String dosageLabel = '';
-          try { dosageLabel = m.dosageForm.label; } catch (_) {}
+            String dosageLabel = '';
+            try { dosageLabel = m.dosageForm.label; } catch (_) {}
 
-          String id = '';
-          try { id = m.id.value; } catch (_) {}
+            String id = '';
+            try { id = m.id.value; } catch (_) {}
 
-          if (name.toLowerCase().contains(trimmed) ||
-              generic.toLowerCase().contains(trimmed) ||
-              manufacturer.toLowerCase().contains(trimmed) ||
-              barcode.toLowerCase().contains(trimmed) ||
-              rack.toLowerCase().contains(trimmed) ||
-              strength.toLowerCase().contains(trimmed) ||
-              category.toLowerCase().contains(trimmed)) {
-            items.add(GlobalSearchResultItem(
-              id: id,
-              title: name,
-              subtitle: [
-                if (generic.isNotEmpty) generic,
-                if (manufacturer.isNotEmpty) manufacturer,
-                if (dosageLabel.isNotEmpty) dosageLabel,
-                if (strength.isNotEmpty) strength,
-                if (rack.isNotEmpty) '📍 Rack: $rack',
-              ].join(' • '),
-              tag: 'MEDICINE',
-              type: GlobalSearchResultType.medicine,
-              targetTabIndex: 4,
-              rawData: m,
-            ));
+            if (name.toLowerCase().contains(trimmed) ||
+                generic.toLowerCase().contains(trimmed) ||
+                manufacturer.toLowerCase().contains(trimmed) ||
+                barcode.toLowerCase().contains(trimmed) ||
+                rack.toLowerCase().contains(trimmed) ||
+                strength.toLowerCase().contains(trimmed) ||
+                category.toLowerCase().contains(trimmed)) {
+              items.add(GlobalSearchResultItem(
+                id: id,
+                title: name,
+                subtitle: [
+                  if (generic.isNotEmpty) generic,
+                  if (manufacturer.isNotEmpty) manufacturer,
+                  if (dosageLabel.isNotEmpty) dosageLabel,
+                  if (strength.isNotEmpty) strength,
+                  if (rack.isNotEmpty) '📍 Rack: $rack',
+                ].join(' • '),
+                tag: 'MEDICINE',
+                type: GlobalSearchResultType.medicine,
+                targetTabIndex: 4,
+                rawData: m,
+              ));
+            }
           }
         }
+      } catch (e) {
+        debugPrint('⚠ GlobalSearch medicine error: $e');
       }
-    } catch (e) {
-      debugPrint('⚠ GlobalSearch medicine error: $e');
     }
 
     // ── 2. Search Customers ──
-    try {
-      final custResult = await _customerRepo.getCustomers(searchQuery: trimmed);
-      if (generation == _searchGeneration) {
-        final customers = _unwrapResult(custResult);
+    if (_canSearch(PermissionCategory.customers)) {
+      try {
+        final custResult = await _customerRepo.getCustomers(searchQuery: trimmed);
+        if (generation == _searchGeneration) {
+          final customers = _unwrapResult(custResult);
 
-        for (final dynamic c in customers) {
-          if (c == null) continue;
+          for (final dynamic c in customers) {
+            if (c == null) continue;
 
-          String name = '';
-          String phone = '';
-          String id = '';
-          String pkr = '0.00';
+            String name = '';
+            String phone = '';
+            String id = '';
+            String pkr = '0.00';
 
-          dynamic customerObj;
-          try { customerObj = c.customer; } catch (_) {}
-          customerObj ??= c;
+            dynamic customerObj;
+            try { customerObj = c.customer; } catch (_) {}
+            customerObj ??= c;
 
-          try { name = customerObj.name; } catch (_) {}
-          try { phone = customerObj.phone; } catch (_) {}
-          try { id = _safeString(customerObj.id); } catch (_) {}
+            try { name = customerObj.name; } catch (_) {}
+            try { phone = customerObj.phone; } catch (_) {}
+            try { id = _safeString(customerObj.id); } catch (_) {}
 
-          try {
-            dynamic rawBalance;
-            try { rawBalance = c.balance; } catch (_) {}
-            num amountInPaisa = 0;
-            if (rawBalance != null) {
-              try {
-                amountInPaisa = rawBalance.paisa;
-              } catch (_) {
+            try {
+              dynamic rawBalance;
+              try { rawBalance = c.balance; } catch (_) {}
+              num amountInPaisa = 0;
+              if (rawBalance != null) {
                 try {
-                  amountInPaisa = rawBalance.amount;
+                  amountInPaisa = rawBalance.paisa;
                 } catch (_) {
-                  amountInPaisa = num.tryParse(rawBalance.toString()) ?? 0;
+                  try {
+                    amountInPaisa = rawBalance.amount;
+                  } catch (_) {
+                    amountInPaisa = num.tryParse(rawBalance.toString()) ?? 0;
+                  }
                 }
               }
-            }
-            pkr = (amountInPaisa / 100).toStringAsFixed(2);
-          } catch (_) {}
+              pkr = (amountInPaisa / 100).toStringAsFixed(2);
+            } catch (_) {}
 
-          if (name.toLowerCase().contains(trimmed) || phone.toLowerCase().contains(trimmed)) {
-            items.add(GlobalSearchResultItem(
-              id: id,
-              title: name,
-              subtitle: 'Phone: $phone • Balance: PKR $pkr',
-              tag: 'CUSTOMER',
-              type: GlobalSearchResultType.customer,
-              targetTabIndex: 5,
-              rawData: c,
-            ));
+            if (name.toLowerCase().contains(trimmed) || phone.toLowerCase().contains(trimmed)) {
+              items.add(GlobalSearchResultItem(
+                id: id,
+                title: name,
+                subtitle: 'Phone: $phone • Balance: PKR $pkr',
+                tag: 'CUSTOMER',
+                type: GlobalSearchResultType.customer,
+                targetTabIndex: 5,
+                rawData: c,
+              ));
+            }
           }
         }
+      } catch (e) {
+        debugPrint('⚠ GlobalSearch customer error: $e');
       }
-    } catch (e) {
-      debugPrint('⚠ GlobalSearch customer error: $e');
     }
 
     // ── 3. Search Suppliers ──
-    try {
-      final suppResult = await _supplierRepo.getSuppliers(searchQuery: trimmed);
-      if (generation == _searchGeneration) {
-        final suppliers = _unwrapResult(suppResult);
+    if (_canSearch(PermissionCategory.suppliers)) {
+      try {
+        final suppResult = await _supplierRepo.getSuppliers(searchQuery: trimmed);
+        if (generation == _searchGeneration) {
+          final suppliers = _unwrapResult(suppResult);
 
-        for (final dynamic s in suppliers) {
-          if (s == null) continue;
+          for (final dynamic s in suppliers) {
+            if (s == null) continue;
 
-          String name = '';
-          String phone = '';
-          String company = '';
-          String id = '';
-          String pkr = '0.00';
+            String name = '';
+            String phone = '';
+            String company = '';
+            String id = '';
+            String pkr = '0.00';
 
-          dynamic supplierObj;
-          try { supplierObj = s.supplier; } catch (_) {}
-          supplierObj ??= s;
+            dynamic supplierObj;
+            try { supplierObj = s.supplier; } catch (_) {}
+            supplierObj ??= s;
 
-          try { name = supplierObj.name; } catch (_) {}
-          try { phone = supplierObj.phone; } catch (_) {}
-          try { id = _safeString(supplierObj.id); } catch (_) {}
-          try {
-            company = supplierObj.companyName ?? supplierObj.company ?? supplierObj.contactPerson ?? '';
-          } catch (_) {}
+            try { name = supplierObj.name; } catch (_) {}
+            try { phone = supplierObj.phone; } catch (_) {}
+            try { id = _safeString(supplierObj.id); } catch (_) {}
+            try {
+              company = supplierObj.companyName ?? supplierObj.company ?? supplierObj.contactPerson ?? '';
+            } catch (_) {}
 
-          try {
-            dynamic rawBalance;
-            try { rawBalance = s.balance; } catch (_) {}
-            num amountInPaisa = 0;
-            if (rawBalance != null) {
-              try {
-                amountInPaisa = rawBalance.paisa;
-              } catch (_) {
+            try {
+              dynamic rawBalance;
+              try { rawBalance = s.balance; } catch (_) {}
+              num amountInPaisa = 0;
+              if (rawBalance != null) {
                 try {
-                  amountInPaisa = rawBalance.amount;
+                  amountInPaisa = rawBalance.paisa;
                 } catch (_) {
-                  amountInPaisa = num.tryParse(rawBalance.toString()) ?? 0;
+                  try {
+                    amountInPaisa = rawBalance.amount;
+                  } catch (_) {
+                    amountInPaisa = num.tryParse(rawBalance.toString()) ?? 0;
+                  }
                 }
               }
-            }
-            pkr = (amountInPaisa / 100).toStringAsFixed(2);
-          } catch (_) {}
+              pkr = (amountInPaisa / 100).toStringAsFixed(2);
+            } catch (_) {}
 
-          if (name.toLowerCase().contains(trimmed) || phone.toLowerCase().contains(trimmed)) {
-            items.add(GlobalSearchResultItem(
-              id: id,
-              title: name,
-              subtitle: [
-                if (company.isNotEmpty) company,
-                'Phone: $phone',
-                'Balance: PKR $pkr',
-              ].join(' • '),
-              tag: 'SUPPLIER',
-              type: GlobalSearchResultType.supplier,
-              targetTabIndex: 6,
-              rawData: s,
-            ));
+            if (name.toLowerCase().contains(trimmed) || phone.toLowerCase().contains(trimmed)) {
+              items.add(GlobalSearchResultItem(
+                id: id,
+                title: name,
+                subtitle: [
+                  if (company.isNotEmpty) company,
+                  'Phone: $phone',
+                  'Balance: PKR $pkr',
+                ].join(' • '),
+                tag: 'SUPPLIER',
+                type: GlobalSearchResultType.supplier,
+                targetTabIndex: 6,
+                rawData: s,
+              ));
+            }
           }
         }
+      } catch (e) {
+        debugPrint('⚠ GlobalSearch supplier error: $e');
       }
-    } catch (e) {
-      debugPrint('⚠ GlobalSearch supplier error: $e');
     }
 
     if (mounted && generation == _searchGeneration) {

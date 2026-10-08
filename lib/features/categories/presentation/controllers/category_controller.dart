@@ -30,10 +30,12 @@ class CategoryController extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  Future<void> loadAll() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadAll({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final catResult = await _getCategories.execute();
     final mfrResult = await _getManufacturers.execute();

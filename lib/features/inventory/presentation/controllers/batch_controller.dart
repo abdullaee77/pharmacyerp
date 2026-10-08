@@ -4,7 +4,6 @@ import '../../domain/batch.dart';
 import '../../domain/batch_repository.dart';
 import '../../application/batch_use_cases.dart';
 
-/// Presentation controller for batch-level inventory management.
 class BatchController extends ChangeNotifier {
   final GetBatchesUseCase _getBatches;
   final CreateBatchUseCase _createBatch;
@@ -12,10 +11,10 @@ class BatchController extends ChangeNotifier {
   final DeleteBatchUseCase _deleteBatch;
 
   BatchController({required BatchRepository repository})
-    : _getBatches = GetBatchesUseCase(repository),
-      _createBatch = CreateBatchUseCase(repository),
-      _updateBatch = UpdateBatchUseCase(repository),
-      _deleteBatch = DeleteBatchUseCase(repository);
+      : _getBatches = GetBatchesUseCase(repository),
+        _createBatch = CreateBatchUseCase(repository),
+        _updateBatch = UpdateBatchUseCase(repository),
+        _deleteBatch = DeleteBatchUseCase(repository);
 
   List<Batch> _batches = [];
   bool _isLoading = false;
@@ -28,10 +27,12 @@ class BatchController extends ChangeNotifier {
   String? get error => _error;
   BatchStatus? get statusFilter => _statusFilter;
 
-  Future<void> loadBatches() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadBatches({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final result = await _getBatches.execute(
       searchQuery: _searchQuery.isEmpty ? null : _searchQuery,
@@ -41,6 +42,7 @@ class BatchController extends ChangeNotifier {
     result.fold(
       onSuccess: (data) {
         _batches = data;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },

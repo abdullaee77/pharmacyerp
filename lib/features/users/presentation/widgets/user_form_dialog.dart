@@ -1,3 +1,7 @@
+// lib/features/users/presentation/widgets/user_form_dialog.dart
+
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -29,6 +33,11 @@ class _UserFormDialogState extends State<UserFormDialog> {
 
   bool get _isEdit => widget.existing != null;
 
+  static String _hashPassword(String password) {
+    final bytes = utf8.encode(password.trim());
+    return sha256.convert(bytes).toString();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -39,9 +48,9 @@ class _UserFormDialogState extends State<UserFormDialog> {
     _passwordCtrl = TextEditingController();
     _roleId =
         u?.roleId ??
-        (widget.controller.roles.isNotEmpty
-            ? widget.controller.roles.first.id.value
-            : null);
+            (widget.controller.roles.isNotEmpty
+                ? widget.controller.roles.first.id.value
+                : null);
     _status = u?.status ?? UserStatus.active;
   }
 
@@ -56,7 +65,9 @@ class _UserFormDialogState extends State<UserFormDialog> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (!_isEdit && _passwordCtrl.text.isEmpty) {
+    final rawPassword = _passwordCtrl.text.trim();
+
+    if (!_isEdit && rawPassword.isEmpty) {
       AppToast.error(context, 'Password is required for new users.');
       return;
     }
@@ -67,6 +78,11 @@ class _UserFormDialogState extends State<UserFormDialog> {
 
     setState(() => _isSaving = true);
     final now = DateTime.now();
+
+    // Hash the password into SHA-256 to align with client/server authentication comparisons
+    final hashedPassword =
+    rawPassword.isNotEmpty ? _hashPassword(rawPassword) : '';
+
     final user = AppUser(
       id: _isEdit ? widget.existing!.id : AppUserId.generate(),
       fullName: _nameCtrl.text.trim(),
@@ -74,6 +90,9 @@ class _UserFormDialogState extends State<UserFormDialog> {
       phone: _phoneCtrl.text.trim(),
       roleId: _roleId!,
       status: _status,
+      passwordHash: hashedPassword.isNotEmpty
+          ? hashedPassword
+          : (widget.existing?.passwordHash ?? ''),
       createdAt: widget.existing?.createdAt ?? now,
       updatedAt: now,
     );
@@ -82,7 +101,7 @@ class _UserFormDialogState extends State<UserFormDialog> {
     if (_isEdit) {
       error = await widget.controller.updateUser(user);
     } else {
-      error = await widget.controller.createUser(user, _passwordCtrl.text);
+      error = await widget.controller.createUser(user, hashedPassword);
     }
 
     setState(() => _isSaving = false);
@@ -137,20 +156,26 @@ class _UserFormDialogState extends State<UserFormDialog> {
                       isRequired: true,
                       autofocus: true,
                       validator: (v) =>
-                          v == null || v.trim().isEmpty ? 'Required' : null,
+                      v == null || v.trim().isEmpty ? 'Required' : null,
                     ),
                     const SizedBox(height: AppSpacing.md),
                     Row(
                       children: [
                         Expanded(
-                          child: AppTextField(
-                            controller: _usernameCtrl,
-                            label: 'Username',
-                            prefixIcon: Icons.alternate_email_rounded,
-                            isRequired: true,
-                            validator: (v) => v == null || v.trim().isEmpty
-                                ? 'Required'
-                                : null,
+                          child: IgnorePointer(
+                            ignoring: _isEdit,
+                            child: Opacity(
+                              opacity: _isEdit ? 0.6 : 1.0,
+                              child: AppTextField(
+                                controller: _usernameCtrl,
+                                label: 'Username',
+                                prefixIcon: Icons.alternate_email_rounded,
+                                isRequired: true,
+                                validator: (v) => v == null || v.trim().isEmpty
+                                    ? 'Required'
+                                    : null,
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(width: AppSpacing.md),
@@ -184,10 +209,10 @@ class _UserFormDialogState extends State<UserFormDialog> {
                             items: roles
                                 .map(
                                   (r) => DropdownMenuItem(
-                                    value: r.id.value,
-                                    child: Text(r.name),
-                                  ),
-                                )
+                                value: r.id.value,
+                                child: Text(r.name),
+                              ),
+                            )
                                 .toList(),
                             onChanged: (v) => setState(() => _roleId = v),
                           ),
@@ -202,13 +227,13 @@ class _UserFormDialogState extends State<UserFormDialog> {
                             items: UserStatus.values
                                 .map(
                                   (s) => DropdownMenuItem(
-                                    value: s,
-                                    child: Text(s.label),
-                                  ),
-                                )
+                                value: s,
+                                child: Text(s.label),
+                              ),
+                            )
                                 .toList(),
                             onChanged: (v) => setState(
-                              () => _status = v ?? UserStatus.active,
+                                  () => _status = v ?? UserStatus.active,
                             ),
                           ),
                         ),

@@ -1,7 +1,6 @@
-// lib/features/reports/presentation/controllers/report_controller.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:pharmacy/core/services/app_event_bus.dart'; // Import Event Bus
+import 'package:pharmacy/core/services/app_event_bus.dart';
 import '../../application/report_use_cases.dart';
 import '../../domain/report_models.dart';
 import '../../domain/report_repository.dart';
@@ -9,17 +8,16 @@ import '../../domain/report_repository.dart';
 class ReportController extends ChangeNotifier {
   final GenerateReportUseCase _generateReport;
   final GetBusinessMetricsUseCase _getMetrics;
-  StreamSubscription<AppEvent>? _eventSubscription; // Stream subscription tracker
+  StreamSubscription<AppEvent>? _eventSubscription;
 
   ReportController({required ReportRepository repository})
       : _generateReport = GenerateReportUseCase(repository),
         _getMetrics = GetBusinessMetricsUseCase(repository) {
-    // ── Listen to Event Bus reactively ──
     _eventSubscription = AppEventBus.instance.stream.listen((event) {
       if (event == AppEvent.saleCompleted ||
           event == AppEvent.purchaseCompleted ||
           event == AppEvent.expenseAdded) {
-        loadMetrics(); // Auto-refresh metrics instantly!
+        loadMetrics(silent: true);
       }
     });
   }
@@ -50,15 +48,18 @@ class ReportController extends ChangeNotifier {
     generateReport();
   }
 
-  Future<void> generateReport() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> generateReport({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final result = await _generateReport.execute(_selectedType, _filter);
     result.fold(
       onSuccess: (data) {
         _currentReport = data;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },
@@ -70,15 +71,18 @@ class ReportController extends ChangeNotifier {
     );
   }
 
-  Future<void> loadMetrics() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadMetrics({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final result = await _getMetrics.execute();
     result.fold(
       onSuccess: (data) {
         _metrics = data;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },
@@ -92,7 +96,7 @@ class ReportController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _eventSubscription?.cancel(); // Prevent memory leaks on controller teardown
+    _eventSubscription?.cancel();
     super.dispose();
   }
 }

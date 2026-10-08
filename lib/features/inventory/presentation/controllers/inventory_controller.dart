@@ -6,28 +6,23 @@ import '../../domain/inventory_movement.dart';
 import '../../domain/inventory_repository.dart';
 import '../../application/inventory_use_cases.dart';
 
-/// Presentation controller driving Inventory Ledger grids and detail panels.
 class InventoryController extends ChangeNotifier {
   final GetStockLevelsUseCase _getStockLevels;
   final AdjustStockUseCase _adjustStock;
   final GetMovementsUseCase _getMovements;
 
   StreamSubscription<AppEvent>? _eventSubscription;
-  MedicineId? _activeMedicineId; // Tracks currently inspected medicine for live movement log updates
+  MedicineId? _activeMedicineId;
 
   InventoryController({required InventoryRepository repository})
       : _getStockLevels = GetStockLevelsUseCase(repository),
         _adjustStock = AdjustStockUseCase(repository),
         _getMovements = GetMovementsUseCase(repository) {
-
-    // ── Listen to Event Bus for Automatic Real-Time Updates ──
     _eventSubscription = AppEventBus.instance.stream.listen((event) {
       if (event == AppEvent.saleCompleted ||
           event == AppEvent.purchaseCompleted ||
           event == AppEvent.medicineUpdated) {
-        loadStockLevels();
-
-        // If an audit movement history sheet is currently open, auto-refresh it
+        loadStockLevels(silent: true);
         if (_activeMedicineId != null) {
           _reloadActiveMovements();
         }
@@ -50,10 +45,12 @@ class InventoryController extends ChangeNotifier {
   String? get statusFilter => _statusFilter;
   MedicineId? get activeMedicineId => _activeMedicineId;
 
-  Future<void> loadStockLevels() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> loadStockLevels({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     final result = await _getStockLevels.execute(
       searchQuery: _searchQuery.isEmpty ? null : _searchQuery,
@@ -63,6 +60,7 @@ class InventoryController extends ChangeNotifier {
     result.fold(
       onSuccess: (data) {
         _stocks = data;
+        _error = null;
         _isLoading = false;
         notifyListeners();
       },
@@ -101,7 +99,6 @@ class InventoryController extends ChangeNotifier {
 
     return result.fold(
       onSuccess: (_) {
-        // Fire event so dashboard, inventory, and medicine screens refresh their stock values
         AppEventBus.instance.fire(AppEvent.medicineUpdated);
         return null;
       },
@@ -133,7 +130,7 @@ class InventoryController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _eventSubscription?.cancel(); // Prevents memory leaks on disposal
+    _eventSubscription?.cancel();
     super.dispose();
   }
 }

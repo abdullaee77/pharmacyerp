@@ -1,5 +1,8 @@
+// lib/features/purchases/data/sqlite_purchase_repository.dart
 import 'package:sqflite/sqflite.dart' as sql;
 import '../../../core/data/database_helper.dart';
+import '../../../core/data/purchase_transaction.dart';
+import '../../../core/data/return_transactions.dart';
 import '../../../core/error/failures.dart';
 import '../../../core/result/result.dart';
 import '../../medicines/domain/medicine.dart';
@@ -12,7 +15,7 @@ class SqlitePurchaseRepository implements PurchaseRepository {
   final DatabaseHelper _dbHelper;
 
   SqlitePurchaseRepository({DatabaseHelper? dbHelper})
-    : _dbHelper = dbHelper ?? DatabaseHelper.instance;
+      : _dbHelper = dbHelper ?? DatabaseHelper.instance;
 
   Future<sql.Database> get _db => _dbHelper.database;
 
@@ -20,8 +23,10 @@ class SqlitePurchaseRepository implements PurchaseRepository {
   Future<Result<Purchase>> createPurchase(Purchase p) async {
     try {
       final db = await _db;
-      await db.transaction((txn) async {
-        await txn.insert('purchases', {
+
+      // Pack exact payload structure matching our PurchaseTransaction payload expectation
+      final payload = {
+        'purchase': {
           'id': p.id.value,
           'invoice_number': p.invoiceNumber.value,
           'supplier_name': p.supplierName,
@@ -31,26 +36,25 @@ class SqlitePurchaseRepository implements PurchaseRepository {
           'status': p.status.name,
           'created_at': p.createdAt.toIso8601String(),
           'updated_at': p.updatedAt.toIso8601String(),
-        });
+        },
+        'items': p.items.map((item) => {
+          'id': item.id,
+          'medicine_id': item.medicineId.value,
+          'medicine_name': item.medicineName,
+          'batch_number': item.batchNumber,
+          'expiry_date': item.expiryDate.toIso8601String(),
+          'quantity': item.quantity,
+          'purchase_price': item.purchasePrice.paisa,
+          'selling_price': item.sellingPrice.paisa,
+          'line_total': item.lineTotal.paisa,
+        }).toList(),
+        'operatorName': 'System standalone/server',
+      };
 
-        for (final item in p.items) {
-          await txn.insert('purchase_items', {
-            'id': item.id,
-            'purchase_id': p.id.value,
-            'medicine_id': item.medicineId.value,
-            'medicine_name': item.medicineName,
-            'batch_number': item.batchNumber,
-            'expiry_date': item.expiryDate.toIso8601String(),
-            'quantity': item.quantity,
-            'purchase_price': item.purchasePrice.paisa,
-            'selling_price': item.sellingPrice.paisa,
-            'line_total': item.lineTotal.paisa,
-          });
-        }
-      });
+      await PurchaseTransaction.run(db, payload);
       return Success(p);
     } catch (e) {
-      return Failure(DatabaseFailure(message: 'Failed to write purchase: $e'));
+      return Failure(DatabaseFailure(message: 'Atomic Purchase Transaction failed: $e'));
     }
   }
 
@@ -97,10 +101,11 @@ class SqlitePurchaseRepository implements PurchaseRepository {
         whereArgs: [id.value],
         limit: 1,
       );
-      if (rows.isEmpty)
+      if (rows.isEmpty) {
         return const Failure(
           NotFoundFailure(message: 'Purchase record not found.'),
         );
+      }
 
       final items = await _loadItems(db, id.value);
       return Success(_rowToPurchase(rows.first, items));
@@ -112,9 +117,9 @@ class SqlitePurchaseRepository implements PurchaseRepository {
   }
 
   Future<List<PurchaseItem>> _loadItems(
-    sql.Database db,
-    String purchaseId,
-  ) async {
+      sql.Database db,
+      String purchaseId,
+      ) async {
     final rows = await db.query(
       'purchase_items',
       where: 'purchase_id = ?',
@@ -123,17 +128,17 @@ class SqlitePurchaseRepository implements PurchaseRepository {
     return rows
         .map(
           (r) => PurchaseItem(
-            id: r['id'] as String,
-            medicineId: MedicineId(r['medicine_id'] as String),
-            medicineName: r['medicine_name'] as String,
-            batchNumber: r['batch_number'] as String,
-            expiryDate: DateTime.parse(r['expiry_date'] as String),
-            quantity: r['quantity'] as int,
-            purchasePrice: Money.fromPaisa(r['purchase_price'] as int),
-            sellingPrice: Money.fromPaisa(r['selling_price'] as int),
-            lineTotal: Money.fromPaisa(r['line_total'] as int),
-          ),
-        )
+        id: r['id'] as String,
+        medicineId: MedicineId(r['medicine_id'] as String),
+        medicineName: r['medicine_name'] as String,
+        batchNumber: r['batch_number'] as String,
+        expiryDate: DateTime.parse(r['expiry_date'] as String),
+        quantity: r['quantity'] as int,
+        purchasePrice: Money.fromPaisa(r['purchase_price'] as int),
+        sellingPrice: Money.fromPaisa(r['selling_price'] as int),
+        lineTotal: Money.fromPaisa(r['line_total'] as int),
+      ),
+    )
         .toList();
   }
 
@@ -152,14 +157,16 @@ class SqlitePurchaseRepository implements PurchaseRepository {
     );
   }
 
-  // ─── PURCHASE RETURNS ────────────────────────────────────────
+  // ─── ATOMIC PURCHASE RETURNS ────────────────────────────────────────
 
   @override
   Future<Result<PurchaseReturn>> createPurchaseReturn(PurchaseReturn r) async {
     try {
       final db = await _db;
-      await db.transaction((txn) async {
-        await txn.insert('purchase_returns', {
+
+      // Wrap in standard transaction map format
+      final payload = {
+        'return': {
           'id': r.id.value,
           'original_purchase_id': r.originalPurchaseId.value,
           'original_invoice_number': r.originalInvoiceNumber,
@@ -169,41 +176,32 @@ class SqlitePurchaseRepository implements PurchaseRepository {
           'total_refund': r.totalRefund.paisa,
           'operator_name': r.operatorName,
           'created_at': r.createdAt.toIso8601String(),
-        });
+        },
+        'items': r.items.map((item) => {
+          'id': item.id,
+          'original_purchase_item_id': item.originalPurchaseItemId,
+          'medicine_id': item.medicineId.value,
+          'medicine_name': item.medicineName,
+          'batch_number': item.batchNumber,
+          'quantity': item.quantity,
+          'refund_amount': item.refundAmount.paisa,
+        }).toList(),
+        'accountId': null, // default ledger allocation, adjust when accounts selected
+      };
 
-        for (final item in r.items) {
-          await txn.insert('purchase_return_items', {
-            'id': item.id,
-            'return_id': r.id.value,
-            'original_purchase_item_id': item.originalPurchaseItemId,
-            'medicine_id': item.medicineId.value,
-            'medicine_name': item.medicineName,
-            'batch_number': item.batchNumber,
-            'quantity': item.quantity,
-            'refund_amount': item.refundAmount.paisa,
-          });
-        }
-
-        // Update purchase header state
-        await txn.update(
-          'purchases',
-          {'status': PurchaseStatus.partiallyReturned.name},
-          where: 'id = ?',
-          whereArgs: [r.originalPurchaseId.value],
-        );
-      });
+      await PurchaseReturnTransaction.run(db, payload);
       return Success(r);
     } catch (e) {
       return Failure(
-        DatabaseFailure(message: 'Failed to write purchase return: $e'),
+        DatabaseFailure(message: 'Atomic Purchase Return Transaction failed: $e'),
       );
     }
   }
 
   @override
   Future<Result<List<PurchaseReturn>>> getReturnsForPurchase(
-    PurchaseId id,
-  ) async {
+      PurchaseId id,
+      ) async {
     try {
       final db = await _db;
       final rows = await db.query(
@@ -226,7 +224,7 @@ class SqlitePurchaseRepository implements PurchaseRepository {
             originalInvoiceNumber: r['original_invoice_number'] as String,
             supplierName: r['supplier_name'] as String,
             reason: PurchaseReturnReason.values.firstWhere(
-              (e) => e.name == r['reason'],
+                  (e) => e.name == r['reason'],
             ),
             notes: r['notes'] as String?,
             totalRefund: Money.fromPaisa(r['total_refund'] as int),
@@ -235,16 +233,16 @@ class SqlitePurchaseRepository implements PurchaseRepository {
             items: items
                 .map(
                   (ri) => PurchaseReturnItem(
-                    id: ri['id'] as String,
-                    originalPurchaseItemId:
-                        ri['original_purchase_item_id'] as String,
-                    medicineId: MedicineId(ri['medicine_id'] as String),
-                    medicineName: ri['medicine_name'] as String,
-                    batchNumber: ri['batch_number'] as String,
-                    quantity: ri['quantity'] as int,
-                    refundAmount: Money.fromPaisa(ri['refund_amount'] as int),
-                  ),
-                )
+                id: ri['id'] as String,
+                originalPurchaseItemId:
+                ri['original_purchase_item_id'] as String,
+                medicineId: MedicineId(ri['medicine_id'] as String),
+                medicineName: ri['medicine_name'] as String,
+                batchNumber: ri['batch_number'] as String,
+                quantity: ri['quantity'] as int,
+                refundAmount: Money.fromPaisa(ri['refund_amount'] as int),
+              ),
+            )
                 .toList(),
           ),
         );

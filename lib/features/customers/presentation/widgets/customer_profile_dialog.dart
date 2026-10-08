@@ -4,7 +4,9 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
-import '../../../medicines/domain/value_objects.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../authentication/domain/user.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/customer.dart';
 import '../../domain/customer_ledger.dart';
 import '../controllers/customer_controller.dart';
@@ -14,14 +16,16 @@ class CustomerProfileDialog extends StatefulWidget {
   final CustomerController controller;
   final CustomerWithBalance customer;
   final String operatorName;
-  final VoidCallback onEdit;
+  final User? user;
+  final VoidCallback? onEdit;
 
   const CustomerProfileDialog({
     super.key,
     required this.controller,
     required this.customer,
     required this.operatorName,
-    required this.onEdit,
+    this.user,
+    this.onEdit,
   });
 
   @override
@@ -37,10 +41,14 @@ class _CustomerProfileDialogState extends State<CustomerProfileDialog> {
     });
   }
 
+  // Record Payment is a customer-ledger write. Treat it as customers.add
+  // (creates a ledger entry on behalf of the customer).
+  bool get _canRecordPayment => PermissionGate.allow(
+      widget.user, PermissionCategory.customers, PermissionAction.add);
+
   Future<void> _openPayment() async {
-    // Recompute outstanding from controller's loaded customers to catch latest.
     final latest = widget.controller.customers.firstWhere(
-      (c) => c.customer.id == widget.customer.customer.id,
+          (c) => c.customer.id == widget.customer.customer.id,
       orElse: () => widget.customer,
     );
 
@@ -73,7 +81,7 @@ class _CustomerProfileDialogState extends State<CustomerProfileDialog> {
       listenable: widget.controller,
       builder: (context, _) {
         final latest = widget.controller.customers.firstWhere(
-          (c) => c.customer.id == widget.customer.customer.id,
+              (c) => c.customer.id == widget.customer.customer.id,
           orElse: () => widget.customer,
         );
         final c = latest.customer;
@@ -85,7 +93,6 @@ class _CustomerProfileDialogState extends State<CustomerProfileDialog> {
             constraints: const BoxConstraints(maxWidth: 820, maxHeight: 680),
             child: Column(
               children: [
-                // Header
                 Padding(
                   padding: const EdgeInsets.all(AppSpacing.lg),
                   child: Row(
@@ -107,7 +114,8 @@ class _CustomerProfileDialogState extends State<CustomerProfileDialog> {
                           children: [
                             Row(
                               children: [
-                                Text(c.name, style: AppTypography.sectionTitle),
+                                Text(c.name,
+                                    style: AppTypography.sectionTitle),
                                 const SizedBox(width: 8),
                                 AppBadge(
                                   label: c.status.label,
@@ -129,21 +137,24 @@ class _CustomerProfileDialogState extends State<CustomerProfileDialog> {
                           ],
                         ),
                       ),
-                      AppButton(
-                        label: 'Record Payment',
-                        icon: Icons.payments_rounded,
-                        variant: AppButtonVariant.success,
-                        size: AppButtonSize.small,
-                        onPressed: _openPayment,
-                      ),
-                      const SizedBox(width: 8),
-                      AppButton(
-                        label: 'Edit',
-                        icon: Icons.edit_outlined,
-                        variant: AppButtonVariant.outlined,
-                        size: AppButtonSize.small,
-                        onPressed: widget.onEdit,
-                      ),
+                      if (_canRecordPayment)
+                        AppButton(
+                          label: 'Record Payment',
+                          icon: Icons.payments_rounded,
+                          variant: AppButtonVariant.success,
+                          size: AppButtonSize.small,
+                          onPressed: _openPayment,
+                        ),
+                      if (widget.onEdit != null) ...[
+                        const SizedBox(width: 8),
+                        AppButton(
+                          label: 'Edit',
+                          icon: Icons.edit_outlined,
+                          variant: AppButtonVariant.outlined,
+                          size: AppButtonSize.small,
+                          onPressed: widget.onEdit,
+                        ),
+                      ],
                       const SizedBox(width: 8),
                       IconButton(
                         icon: const Icon(Icons.close_rounded, size: 20),
@@ -155,7 +166,6 @@ class _CustomerProfileDialogState extends State<CustomerProfileDialog> {
                 ),
                 const Divider(height: 1),
 
-                // Summary cards
                 Padding(
                   padding: const EdgeInsets.all(AppSpacing.lg),
                   child: Row(
@@ -189,7 +199,6 @@ class _CustomerProfileDialogState extends State<CustomerProfileDialog> {
                   ),
                 ),
 
-                // Ledger
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(

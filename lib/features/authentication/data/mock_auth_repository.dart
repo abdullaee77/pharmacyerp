@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../../../core/error/failures.dart';
 import '../../../core/result/result.dart';
+import '../../users/domain/role.dart';
 import '../domain/auth_repository.dart';
 import '../domain/user.dart';
 
@@ -9,6 +10,14 @@ import '../domain/user.dart';
 /// Simulates latency and verifies credentials using a hardcoded local registry.
 class MockAuthRepository implements AuthRepository {
   User? _currentUser;
+
+  /// Built-in role IDs for each mock role, so permissions match the real DB seed.
+  static const Map<UserRole, RoleId> _roleIds = {
+    UserRole.admin: RoleId.admin,
+    UserRole.manager: RoleId.manager,
+    UserRole.pharmacist: RoleId.pharmacist,
+    UserRole.cashier: RoleId.cashier,
+  };
 
   // Local user register database mockup
   static final List<Map<String, dynamic>> _userDb = [
@@ -45,18 +54,24 @@ class MockAuthRepository implements AuthRepository {
 
     try {
       final userRecord = _userDb.firstWhere(
-        (u) =>
-            u['username'] == username.toLowerCase() &&
+            (u) =>
+        u['username'] == username.toLowerCase() &&
             u['password'] == password,
         orElse: () => throw const AuthenticationFailure(),
       );
+
+      final role = userRecord['role'] as UserRole;
+      final roleId = _roleIds[role]!;
 
       final user = User(
         id: UserId(userRecord['id'] as String),
         username: userRecord['username'] as String,
         fullName: userRecord['fullName'] as String,
         email: userRecord['email'] as String,
-        role: userRecord['role'] as UserRole,
+        role: role,
+        roleId: roleId.value,
+        roleName: role.label,
+        permissions: Permission.defaultsFor(roleId),
       );
 
       _currentUser = user;

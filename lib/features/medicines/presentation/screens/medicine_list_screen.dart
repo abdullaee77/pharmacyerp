@@ -4,14 +4,22 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../authentication/presentation/controllers/auth_controller.dart';
+import '../../../users/domain/role.dart';
 import '../../domain/medicine.dart';
 import '../controllers/medicine_controller.dart';
 import '../widgets/medicine_form_dialog.dart';
 
 class MedicineListScreen extends StatefulWidget {
   final MedicineController controller;
+  final AuthController authController;
 
-  const MedicineListScreen({super.key, required this.controller});
+  const MedicineListScreen({
+    super.key,
+    required this.controller,
+    required this.authController,
+  });
 
   @override
   State<MedicineListScreen> createState() => _MedicineListScreenState();
@@ -28,6 +36,13 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
       widget.controller.loadFilterOptions();
     });
   }
+
+  bool get _canAdd => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.medicines, PermissionAction.add);
+  bool get _canEdit => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.medicines, PermissionAction.edit);
+  bool get _canDelete => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.medicines, PermissionAction.delete);
 
   Future<void> _openAddDialog() async {
     final result = await showDialog<MedicineCreationResult>(
@@ -48,7 +63,8 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
         final stockMsg = result.openingStock != null
             ? ' with ${result.openingStock!.quantity} units stock'
             : '';
-        AppToast.success(context, 'Medicine "${result.medicine.name}" added$stockMsg.');
+        AppToast.success(
+            context, 'Medicine "${result.medicine.name}" added$stockMsg.');
       }
     }
   }
@@ -117,7 +133,6 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Controls Panel
             Container(
               padding: const EdgeInsets.all(AppSpacing.md),
               decoration: BoxDecoration(
@@ -142,11 +157,15 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                       decoration: InputDecoration(
                         labelText: 'Filter by Category',
                         isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        border: OutlineInputBorder(
+                            borderRadius:
+                            BorderRadius.circular(AppRadius.sm)),
                       ),
                       items: [
-                        const DropdownMenuItem(value: '', child: Text('All Categories')),
+                        const DropdownMenuItem(
+                            value: '', child: Text('All Categories')),
                         ...ctrl.categories.map((cat) => DropdownMenuItem(
                           value: cat,
                           child: Text(cat),
@@ -160,18 +179,18 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                     ),
                   ),
                   const SizedBox(width: AppSpacing.md),
-                  AppButton(
-                    label: 'Add Medicine',
-                    icon: Icons.add_rounded,
-                    variant: AppButtonVariant.primary,
-                    onPressed: _openAddDialog,
-                  ),
+                  if (_canAdd)
+                    AppButton(
+                      label: 'Add Medicine',
+                      icon: Icons.add_rounded,
+                      variant: AppButtonVariant.primary,
+                      onPressed: _openAddDialog,
+                    ),
                 ],
               ),
             ),
             const SizedBox(height: AppSpacing.md),
 
-            // Dynamic List/Table State
             Expanded(
               child: ctrl.isLoading
                   ? const AppLoading(message: 'Loading medicine catalog...')
@@ -195,13 +214,17 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                     dataRowMaxHeight: 56,
                     horizontalMargin: AppSpacing.lg,
                     columnSpacing: AppSpacing.lg,
-                    headingRowColor: WidgetStatePropertyAll(AppColors.surfaceVariant),
+                    headingRowColor: WidgetStatePropertyAll(
+                        AppColors.surfaceVariant),
                     columns: const [
                       DataColumn(label: Text('Medicine Name')),
                       DataColumn(label: Text('Category')),
                       DataColumn(label: Text('Company')),
-                      DataColumn(label: Text('Retail Price (PKR)'), numeric: true),
-                      DataColumn(label: Text('Box Size'), numeric: true),
+                      DataColumn(
+                          label: Text('Retail Price (PKR)'),
+                          numeric: true),
+                      DataColumn(
+                          label: Text('Box Size'), numeric: true),
                       DataColumn(label: Text('Rack')),
                       DataColumn(label: Text('Actions')),
                     ],
@@ -210,26 +233,41 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                         cells: [
                           DataCell(
                             Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                              mainAxisAlignment:
+                              MainAxisAlignment.center,
                               children: [
                                 Text(
                                   '${m.name} ${m.strength}',
-                                  style: AppTypography.subtitle.copyWith(fontSize: 13),
+                                  style: AppTypography.subtitle
+                                      .copyWith(fontSize: 13),
                                 ),
                                 if (m.genericName.isNotEmpty)
-                                  Text(m.genericName, style: AppTypography.caption),
+                                  Text(m.genericName,
+                                      style: AppTypography.caption),
                               ],
                             ),
                           ),
-                          DataCell(Text(m.category.isEmpty ? '—' : m.category, style: AppTypography.tableCell)),
-                          DataCell(Text(m.manufacturer.isEmpty ? '—' : m.manufacturer, style: AppTypography.tableCell)),
-                          DataCell(Text(m.sellingPrice.display, style: AppTypography.numeric)),
-                          DataCell(Text('${m.boxSize}s', style: AppTypography.numeric)),
+                          DataCell(Text(
+                              m.category.isEmpty ? '—' : m.category,
+                              style: AppTypography.tableCell)),
+                          DataCell(Text(
+                              m.manufacturer.isEmpty
+                                  ? '—'
+                                  : m.manufacturer,
+                              style: AppTypography.tableCell)),
+                          DataCell(Text(m.sellingPrice.display,
+                              style: AppTypography.numeric)),
+                          DataCell(Text('${m.boxSize}s',
+                              style: AppTypography.numeric)),
                           DataCell(
                             Text(
-                              m.rackLocation.isEmpty ? '—' : m.rackLocation,
-                              style: AppTypography.tableCell.copyWith(
+                              m.rackLocation.isEmpty
+                                  ? '—'
+                                  : m.rackLocation,
+                              style:
+                              AppTypography.tableCell.copyWith(
                                 fontWeight: FontWeight.bold,
                                 color: AppColors.primary,
                               ),
@@ -239,16 +277,26 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                             Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                IconButton(
-                                  icon: const Icon(Icons.edit_outlined, size: 16, color: AppColors.primary),
-                                  splashRadius: 16,
-                                  onPressed: () => _openEditDialog(m),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline, size: 16, color: AppColors.error),
-                                  splashRadius: 16,
-                                  onPressed: () => _deleteMedicine(m),
-                                ),
+                                if (_canEdit)
+                                  IconButton(
+                                    icon: const Icon(
+                                        Icons.edit_outlined,
+                                        size: 16,
+                                        color: AppColors.primary),
+                                    splashRadius: 16,
+                                    onPressed: () =>
+                                        _openEditDialog(m),
+                                  ),
+                                if (_canDelete)
+                                  IconButton(
+                                    icon: const Icon(
+                                        Icons.delete_outline,
+                                        size: 16,
+                                        color: AppColors.error),
+                                    splashRadius: 16,
+                                    onPressed: () =>
+                                        _deleteMedicine(m),
+                                  ),
                               ],
                             ),
                           ),

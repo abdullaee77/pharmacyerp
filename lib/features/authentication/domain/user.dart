@@ -1,5 +1,6 @@
 import '../../../core/domain/entity.dart';
 import '../../../core/domain/value_object.dart';
+import '../../users/domain/role.dart';
 
 class UserId extends ValueObject {
   final String value;
@@ -32,6 +33,21 @@ enum UserRole {
     required this.canManageUsers,
     required this.canAdjustStock,
   });
+
+  /// Maps by role ID (never by name). Custom roles fall back to cashier and
+  /// rely entirely on their stored permissions.
+  static UserRole fromRoleId(String roleId) {
+    switch (roleId) {
+      case 'role_admin':
+        return UserRole.admin;
+      case 'role_manager':
+        return UserRole.manager;
+      case 'role_pharmacist':
+        return UserRole.pharmacist;
+      default:
+        return UserRole.cashier;
+    }
+  }
 }
 
 class User extends Entity<UserId> {
@@ -41,6 +57,7 @@ class User extends Entity<UserId> {
   final String email;
   final String roleId;
   final String roleName;
+  final Set<Permission> permissions;
 
   const User({
     required super.id,
@@ -50,10 +67,18 @@ class User extends Entity<UserId> {
     this.email = '',
     this.roleId = '',
     this.roleName = '',
+    this.permissions = const {},
   });
 
-  bool get canManageUsers => role.canManageUsers;
-  bool get canAdjustStock => role.canAdjustStock;
+  /// Admin always has everything, so an admin can never lock themselves out.
+  bool can(PermissionCategory cat, PermissionAction act) =>
+      role == UserRole.admin || permissions.contains(Permission(cat, act));
+
+  bool hasAnyIn(PermissionCategory cat) =>
+      role == UserRole.admin || permissions.any((p) => p.category == cat);
+
+  bool get canManageUsers => can(PermissionCategory.users, PermissionAction.manage);
+  bool get canAdjustStock => can(PermissionCategory.inventory, PermissionAction.adjust);
 
   @override
   String toString() => 'User($username, Role: ${roleName.isEmpty ? role.name : roleName})';
