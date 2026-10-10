@@ -1,3 +1,5 @@
+// lib/features/shell/domain/ribbon_action.dart
+
 import 'package:flutter/material.dart';
 import '../../../core/domain/value_object.dart';
 import '../../../features/users/domain/role.dart';
@@ -318,34 +320,34 @@ class RibbonAction extends ValueObject {
           ),
         ];
 
-      case NavigationItem.more:
+      case NavigationItem.settings:
         return [
           RibbonAction(
-            id: 'more_users',
+            id: 'admin_users',
             label: 'User Management',
             icon: Icons.manage_accounts_outlined,
             requiredPermission: const Permission(PermissionCategory.users, PermissionAction.manage),
             onPressed: () {},
           ),
           RibbonAction(
-            id: 'more_settings',
-            label: 'Settings',
-            icon: Icons.settings_outlined,
+            id: 'admin_store',
+            label: 'Store Info',
+            icon: Icons.store_rounded,
             requiredPermission: const Permission(PermissionCategory.settings, PermissionAction.manage),
             onPressed: () {},
           ),
           RibbonAction(
-            id: 'more_backup',
+            id: 'admin_printer',
+            label: 'Printer Setup',
+            icon: Icons.print_rounded,
+            requiredPermission: const Permission(PermissionCategory.settings, PermissionAction.manage),
+            onPressed: () {},
+          ),
+          RibbonAction(
+            id: 'admin_backup',
             label: 'Backup & Restore',
             icon: Icons.cloud_sync_outlined,
             requiredPermission: const Permission(PermissionCategory.settings, PermissionAction.manage),
-            onPressed: () {},
-          ),
-          RibbonAction(
-            id: 'more_license',
-            label: 'License Info',
-            icon: Icons.verified_user_outlined,
-            requiredPermission: const Permission(PermissionCategory.licensing, PermissionAction.view),
             onPressed: () {},
           ),
         ];

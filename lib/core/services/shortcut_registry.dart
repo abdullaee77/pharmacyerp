@@ -1,3 +1,5 @@
+// lib/core/services/shortcut_registry.dart
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -15,7 +17,7 @@ class ShortcutRegistry {
   static const goToSuppliers = SingleActivator(LogicalKeyboardKey.digit7, alt: true);
   static const goToAccounts = SingleActivator(LogicalKeyboardKey.digit8, alt: true);
   static const goToReports = SingleActivator(LogicalKeyboardKey.digit9, alt: true);
-  static const goToMore = SingleActivator(LogicalKeyboardKey.digit0, alt: true);
+  static const goToSettings = SingleActivator(LogicalKeyboardKey.digit0, alt: true);
 
   // ── Global App Actions (Ctrl + K / Cmd + K) ───────────────────
   static const quickSearchCtrl = SingleActivator(LogicalKeyboardKey.keyK, control: true);
@@ -41,7 +43,7 @@ class ShortcutRegistry {
     'Alt+7': 'Suppliers',
     'Alt+8': 'Accounts',
     'Alt+9': 'Reports',
-    'Alt+0': 'More',
+    'Alt+0': 'Settings',
     'Ctrl+K': 'Quick Search',
     'Esc': 'Dismiss / Close',
     'F1': 'Go to POS',
@@ -64,7 +66,7 @@ class NavigateCustomersIntent extends Intent { const NavigateCustomersIntent(); 
 class NavigateSuppliersIntent extends Intent { const NavigateSuppliersIntent(); }
 class NavigateAccountsIntent extends Intent { const NavigateAccountsIntent(); }
 class NavigateReportsIntent extends Intent { const NavigateReportsIntent(); }
-class NavigateMoreIntent extends Intent { const NavigateMoreIntent(); }
+class NavigateSettingsIntent extends Intent { const NavigateSettingsIntent(); }
 
 class QuickSearchIntent extends Intent { const QuickSearchIntent(); }
 class ToggleRibbonIntent extends Intent { const ToggleRibbonIntent(); }

@@ -1,3 +1,5 @@
+// lib/core/widgets/app_shortcut_scope.dart
+
 import 'package:flutter/material.dart';
 import '../services/shortcut_registry.dart' as reg;
 
@@ -38,13 +40,11 @@ class AppShortcutScope extends StatelessWidget {
         reg.ShortcutRegistry.goToSuppliers: const reg.NavigateSuppliersIntent(),
         reg.ShortcutRegistry.goToAccounts: const reg.NavigateAccountsIntent(),
         reg.ShortcutRegistry.goToReports: const reg.NavigateReportsIntent(),
-        reg.ShortcutRegistry.goToMore: const reg.NavigateMoreIntent(),
+        reg.ShortcutRegistry.goToSettings: const reg.NavigateSettingsIntent(),
         reg.ShortcutRegistry.quickSearchCtrl: const reg.QuickSearchIntent(),
         reg.ShortcutRegistry.quickSearchCmd: const reg.QuickSearchIntent(),
         reg.ShortcutRegistry.toggleFullscreen: const reg.ToggleFullscreenIntent(),
         reg.ShortcutRegistry.dismiss: const reg.DismissIntent(),
-        // Data-creating shortcuts are registered only when the callback is non-null
-        // (shell_screen passes null when the user lacks the permission).
         if (onNewSale != null) reg.ShortcutRegistry.newSale: const reg.NewSaleIntent(),
         if (onNewPurchase != null) reg.ShortcutRegistry.newPurchase: const reg.NewPurchaseIntent(),
         if (onNewMedicine != null) reg.ShortcutRegistry.newMedicine: const reg.NewMedicineIntent(),
@@ -79,7 +79,7 @@ class AppShortcutScope extends StatelessWidget {
           reg.NavigateReportsIntent: CallbackAction<reg.NavigateReportsIntent>(
             onInvoke: (_) => onNavigateToTab?.call(8),
           ),
-          reg.NavigateMoreIntent: CallbackAction<reg.NavigateMoreIntent>(
+          reg.NavigateSettingsIntent: CallbackAction<reg.NavigateSettingsIntent>(
             onInvoke: (_) => onNavigateToTab?.call(9),
           ),
           reg.QuickSearchIntent: CallbackAction<reg.QuickSearchIntent>(

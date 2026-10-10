@@ -1,9 +1,14 @@
+// lib/features/sales/presentation/widgets/invoice_dialog.dart
+
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
+import '../../../../core/services/receipt_printer.dart';
+import '../../../../core/services/receipt_pdf_builder.dart';
+import '../../../../core/services/printer_settings.dart';
 
 class InvoiceLineData {
   final String medicineName;
@@ -61,6 +66,78 @@ class InvoiceDialog extends StatelessWidget {
         '${createdAt.minute.toString().padLeft(2, '0')}';
   }
 
+  Future<void> _printReceipt(BuildContext context) async {
+    try {
+      AppToast.info(context, 'Generating receipt...');
+
+      final layout = await PrinterSettings.layout;
+      final isCompact = await PrinterSettings.isCompact;
+      final marginLeft = await PrinterSettings.marginLeftMm;
+      final marginRight = await PrinterSettings.marginRightMm;
+      final fontScale = await PrinterSettings.fontScale;
+      final printerName = await PrinterSettings.printerName;
+      final pharmName = await PrinterSettings.pharmacyName;
+      final pharmPhone = await PrinterSettings.pharmacyPhone;
+      final pharmAddr = await PrinterSettings.pharmacyAddress;
+      final logoPath = await PrinterSettings.pharmacyLogoPath;
+      final footer = await PrinterSettings.footerMessage;
+      final vendorFooter = await PrinterSettings.showVendorFooter;
+      final useDirect = await PrinterSettings.directPrint;
+
+      final pdfBytes = await ReceiptPdfBuilder.build(
+        invoiceNumber: invoiceNumber,
+        customerName: customerName,
+        customerPhone: customerPhone,
+        operatorName: operatorName,
+        lines: lines,
+        subtotal: subtotal,
+        discount: discount,
+        grandTotal: grandTotal,
+        amountReceived: amountReceived,
+        change: change,
+        paymentSummary: paymentSummary,
+        createdAt: createdAt,
+        layout: layout,
+        isCompact: isCompact,
+        marginLeftMm: marginLeft,
+        marginRightMm: marginRight,
+        fontScale: fontScale,
+        pharmacyName: pharmName.isEmpty ? 'PharmaSuite ERP' : pharmName,
+        pharmacyPhone: pharmPhone,
+        pharmacyAddress: pharmAddr,
+        logoPath: logoPath.isEmpty ? null : logoPath,
+        footerMessage: footer.isEmpty ? 'Thank you for your purchase!' : footer,
+        showVendorFooter: vendorFooter,
+      );
+
+      if (!context.mounted) return;
+
+      if (useDirect) {
+        final ok = await ReceiptPrinter.printSilently(
+          pdfBytes: pdfBytes,
+          invoiceName: invoiceNumber,
+          printerName: printerName.isNotEmpty ? printerName : null,
+        );
+        if (context.mounted) {
+          if (ok) {
+            AppToast.success(context, 'Receipt sent to printer.');
+          } else {
+            AppToast.error(context, 'Direct print failed. Check printer settings.');
+          }
+        }
+      } else {
+        await ReceiptPrinter.printWithDialog(
+          pdfBytes: pdfBytes,
+          invoiceName: invoiceNumber,
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        AppToast.error(context, 'Print failed: $e');
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -69,12 +146,12 @@ class InvoiceDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header
             Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
               child: Row(
                 children: [
-                  const Icon(Icons.receipt_long_rounded, color: AppColors.primary),
+                  const Icon(Icons.receipt_long_rounded,
+                      color: AppColors.primary),
                   const SizedBox(width: AppSpacing.sm),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,11 +177,17 @@ class InvoiceDialog extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('PHARMASUITE ERP', style: AppTypography.subtitle.copyWith(fontWeight: FontWeight.w800, letterSpacing: 1)),
-                    Text('Main Branch — Counter 01', style: AppTypography.caption),
+                    Text('PHARMASUITE ERP',
+                        style: AppTypography.subtitle.copyWith(
+                            fontWeight: FontWeight.w800, letterSpacing: 1)),
+                    Text('Main Branch — Counter 01',
+                        style: AppTypography.caption),
                     const SizedBox(height: AppSpacing.md),
 
-                    _kv('Customer', customerPhone.isNotEmpty ? '$customerName ($customerPhone)' : customerName),
+                    _kv('Customer',
+                        customerPhone.isNotEmpty
+                            ? '$customerName ($customerPhone)'
+                            : customerName),
                     _kv('Operator', operatorName),
                     _kv('Date / Time', _timestamp),
 
@@ -112,23 +195,32 @@ class InvoiceDialog extends StatelessWidget {
                     const Divider(),
                     const SizedBox(height: AppSpacing.sm),
 
-                    // Items
                     ...lines.map((l) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment:
+                            MainAxisAlignment.spaceBetween,
                             children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(child: Text('${l.medicineName} ${l.strength}', style: AppTypography.subtitle.copyWith(fontSize: 13))),
-                                  Text(l.lineTotal, style: AppTypography.numeric.copyWith(fontWeight: FontWeight.w700)),
-                                ],
+                              Expanded(
+                                child: Text(
+                                    '${l.medicineName} ${l.strength}',
+                                    style: AppTypography.subtitle
+                                        .copyWith(fontSize: 13)),
                               ),
-                              Text('Batch ${l.batchNumber}  ·  ${l.quantity} × ${l.unitPrice}', style: AppTypography.caption),
+                              Text(l.lineTotal,
+                                  style: AppTypography.numeric.copyWith(
+                                      fontWeight: FontWeight.w700)),
                             ],
                           ),
-                        )),
+                          Text(
+                              'Batch ${l.batchNumber}  ·  ${l.quantity} × ${l.unitPrice}',
+                              style: AppTypography.caption),
+                        ],
+                      ),
+                    )),
 
                     const SizedBox(height: AppSpacing.md),
                     const Divider(),
@@ -144,10 +236,15 @@ class InvoiceDialog extends StatelessWidget {
                     _kvNumeric('Change', change),
 
                     const SizedBox(height: AppSpacing.sm),
-                    Text('Payment: $paymentSummary', style: AppTypography.caption),
+                    Text('Payment: $paymentSummary',
+                        style: AppTypography.caption),
 
                     const SizedBox(height: AppSpacing.lg),
-                    Center(child: Text('Thank you for your purchase!', style: AppTypography.caption.copyWith(fontStyle: FontStyle.italic))),
+                    Center(
+                      child: Text('Thank you for your purchase!',
+                          style: AppTypography.caption
+                              .copyWith(fontStyle: FontStyle.italic)),
+                    ),
                   ],
                 ),
               ),
@@ -163,7 +260,7 @@ class InvoiceDialog extends StatelessWidget {
                     label: 'Print Receipt',
                     icon: Icons.print_outlined,
                     variant: AppButtonVariant.outlined,
-                    onPressed: () => AppToast.info(context, 'Printing API ready for future hardware integration.'),
+                    onPressed: () => _printReceipt(context),
                   ),
                   const SizedBox(width: AppSpacing.md),
                   AppButton(
@@ -185,8 +282,13 @@ class InvoiceDialog extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          SizedBox(width: 100, child: Text(k, style: AppTypography.caption)),
-          Expanded(child: Text(v, style: AppTypography.bodySmall.copyWith(fontWeight: FontWeight.w600))),
+          SizedBox(
+              width: 100,
+              child: Text(k, style: AppTypography.caption)),
+          Expanded(
+              child: Text(v,
+                  style: AppTypography.bodySmall
+                      .copyWith(fontWeight: FontWeight.w600))),
         ],
       ),
     );
@@ -198,8 +300,17 @@ class InvoiceDialog extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(k, style: emphasize ? AppTypography.subtitle.copyWith(color: AppColors.primary) : AppTypography.body),
-          Text(v, style: emphasize ? AppTypography.numericLarge.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.primary) : AppTypography.numeric),
+          Text(k,
+              style: emphasize
+                  ? AppTypography.subtitle.copyWith(color: AppColors.primary)
+                  : AppTypography.body),
+          Text(v,
+              style: emphasize
+                  ? AppTypography.numericLarge.copyWith(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.primary)
+                  : AppTypography.numeric),
         ],
       ),
     );

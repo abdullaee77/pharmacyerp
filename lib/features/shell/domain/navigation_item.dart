@@ -1,3 +1,5 @@
+// lib/features/shell/domain/navigation_item.dart
+
 import 'package:flutter/material.dart';
 import '../../authentication/domain/user.dart';
 import '../../users/domain/role.dart';
@@ -67,11 +69,10 @@ enum NavigationItem {
     shortcutLabel: 'Alt+9',
     category: PermissionCategory.reports,
   ),
-  // "More" has no category of its own: visible if any of its sections is allowed.
-  more(
-    label: 'More',
-    icon: Icons.apps_outlined,
-    selectedIcon: Icons.apps_rounded,
+  settings(
+    label: 'Settings',
+    icon: Icons.settings_outlined,
+    selectedIcon: Icons.settings_rounded,
     shortcutLabel: 'Alt+0',
   );
 
@@ -92,27 +93,28 @@ enum NavigationItem {
   /// True when the user may see this tab.
   bool isAllowedFor(User? user) {
     if (user == null) return false;
-    if (this == NavigationItem.more) {
-      return MoreSection.values.any((s) => s.isAllowedFor(user));
+    if (this == NavigationItem.settings) {
+      return AdminSection.values.any((s) => s.isAllowedFor(user));
     }
     return user.hasAnyIn(category!);
   }
 }
 
-/// Sub-tabs inside the "More" page, each gated by one permission.
-enum MoreSection {
+/// Sub-tabs inside the "Settings" page, each gated by one permission.
+enum AdminSection {
   expenses('Expenses', Permission(PermissionCategory.accounts, PermissionAction.view)),
   categories('Categories', Permission(PermissionCategory.medicines, PermissionAction.manage)),
   users('Users', Permission(PermissionCategory.users, PermissionAction.view)),
   roles('Roles & Permissions', Permission(PermissionCategory.users, PermissionAction.manage)),
-  settings('Settings', Permission(PermissionCategory.settings, PermissionAction.view)),
+  store('Store Info', Permission(PermissionCategory.settings, PermissionAction.view)),
+  printer('Printer Settings', Permission(PermissionCategory.settings, PermissionAction.view)),
   network('Network & LAN', Permission(PermissionCategory.settings, PermissionAction.manage)),
-  license('License', Permission(PermissionCategory.licensing, PermissionAction.view)),
-  backup('Backup & Network', Permission(PermissionCategory.settings, PermissionAction.manage));
+  backup('Backup & Restore', Permission(PermissionCategory.settings, PermissionAction.manage)),
+  license('License', Permission(PermissionCategory.licensing, PermissionAction.view));
 
   final String label;
   final Permission permission;
-  const MoreSection(this.label, this.permission);
+  const AdminSection(this.label, this.permission);
 
   bool isAllowedFor(User? user) =>
       user != null && user.can(permission.category, permission.action);

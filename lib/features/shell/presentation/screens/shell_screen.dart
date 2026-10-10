@@ -124,14 +124,14 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
 
   late final TabController _inventoryTabCtrl;
   late final TabController _salesTabCtrl;
-  late final TabController _moreTabCtrl;
+  late final TabController _adminTabCtrl;
 
   late final List<Widget> _pages;
 
   Timer? _reloadDebounce;
 
   late final bool _hasAccess;
-  late final List<MoreSection> _moreSections;
+  late final List<AdminSection> _adminSections;
   late final List<_SubTab> _salesTabs;
 
   @override
@@ -199,8 +199,8 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     _backupController.onDataRestored = _reloadAllData;
     _networkController = NetworkController(settingsRepo: settingsRepo);
 
-    _moreSections =
-        MoreSection.values.where((s) => s.isAllowedFor(user)).toList();
+    _adminSections =
+        AdminSection.values.where((s) => s.isAllowedFor(user)).toList();
     _salesTabs = [
       if (_can(PermissionCategory.sales, PermissionAction.add))
         _SubTab(
@@ -224,8 +224,8 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     _inventoryTabCtrl = TabController(length: 3, vsync: this);
     _salesTabCtrl =
         TabController(length: math.max(1, _salesTabs.length), vsync: this);
-    _moreTabCtrl =
-        TabController(length: math.max(1, _moreSections.length), vsync: this);
+    _adminTabCtrl =
+        TabController(length: math.max(1, _adminSections.length), vsync: this);
 
     _pages = [
       _gatedPage(
@@ -284,14 +284,13 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
         NavigationItem.reports,
             () => ReportsScreen(controller: _reportController),
       ),
-      _gatedPage(NavigationItem.more, _buildMorePage),
+      _gatedPage(NavigationItem.settings, _buildSettingsPage),
     ];
 
     if (isClient) {
       DataSyncService.instance.addListener(_onRemoteDataChanged);
       DataSyncService.instance.start(interval: const Duration(seconds: 2));
     } else {
-      // Connect local Server UI to background API mutation broadcasts
       ApiServer.onServerDataChanged.addListener(_onRemoteDataChanged);
     }
   }
@@ -314,42 +313,53 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     child: Text('You do not have permission to view this section.'),
   );
 
-  Widget _moreSectionWidget(MoreSection s) {
+// ... [Keep imports exactly the same] ...
+
+  Widget _adminSectionWidget(AdminSection s) {
     switch (s) {
-      case MoreSection.expenses:
+      case AdminSection.expenses:
         return ExpensesScreen(
           controller: _expenseController,
           accountController: _accountController,
           authController: widget.authController,
         );
-      case MoreSection.categories:
+      case AdminSection.categories:
         return CategoriesScreen(
           controller: _categoryController,
           authController: widget.authController,
         );
-      case MoreSection.users:
+      case AdminSection.users:
         return UsersScreen(
           controller: _userController,
           authController: widget.authController,
         );
-      case MoreSection.roles:
+      case AdminSection.roles:
         return RolesScreen(
           controller: _userController,
           authController: widget.authController,
         );
-      case MoreSection.settings:
+      case AdminSection.store:
         return SettingsScreen(
+          mode: SettingsMode.store,
           controller: _settingsController,
           authController: widget.authController,
         );
-      case MoreSection.network:
+      case AdminSection.printer:
+        return SettingsScreen(
+          mode: SettingsMode.printer,
+          controller: _settingsController,
+          authController: widget.authController,
+        );
+      case AdminSection.network:
         return NetworkSettingsScreen(controller: _networkController);
-      case MoreSection.license:
-        return LicenseScreen(controller: _licenseController);
-      case MoreSection.backup:
+      case AdminSection.backup:
         return BackupScreen(controller: _backupController);
+      case AdminSection.license:
+        return LicenseScreen(controller: _licenseController);
     }
   }
+
+// ... [Keep the rest of ShellScreen exactly the same] ...
 
   void _onRemoteDataChanged() {
     _reloadDebounce?.cancel();
@@ -390,16 +400,16 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     if (NavigationItem.reports.isAllowedFor(user)) {
       _reportController.generateReport(silent: true);
     }
-    if (MoreSection.expenses.isAllowedFor(user)) {
+    if (AdminSection.expenses.isAllowedFor(user)) {
       _expenseController.loadAll(silent: true);
     }
-    if (MoreSection.categories.isAllowedFor(user)) {
+    if (AdminSection.categories.isAllowedFor(user)) {
       _categoryController.loadAll(silent: true);
     }
-    if (MoreSection.users.isAllowedFor(user)) {
+    if (AdminSection.users.isAllowedFor(user)) {
       _userController.loadUsers(silent: true);
     }
-    if (MoreSection.roles.isAllowedFor(user)) {
+    if (AdminSection.roles.isAllowedFor(user)) {
       _userController.loadRoles(silent: true);
     }
   }
@@ -473,29 +483,29 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     );
   }
 
-  Widget _buildMorePage() {
-    if (_moreSections.isEmpty) return _noAccess();
+  Widget _buildSettingsPage() {
+    if (_adminSections.isEmpty) return _noAccess();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(children: [
-          const Icon(Icons.apps_rounded, color: AppColors.primary, size: 28),
+          const Icon(Icons.settings_rounded, color: AppColors.primary, size: 28),
           const SizedBox(width: AppSpacing.md),
           Text('Administration & Settings', style: AppTypography.pageTitle),
         ]),
         const SizedBox(height: AppSpacing.lg),
         TabBar(
-          controller: _moreTabCtrl,
+          controller: _adminTabCtrl,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
-          tabs: [for (final s in _moreSections) Tab(text: s.label)],
+          tabs: [for (final s in _adminSections) Tab(text: s.label)],
         ),
         const SizedBox(height: AppSpacing.lg),
         Expanded(
           child: TabBarView(
-            controller: _moreTabCtrl,
+            controller: _adminTabCtrl,
             physics: const NeverScrollableScrollPhysics(),
-            children: [for (final s in _moreSections) _moreSectionWidget(s)],
+            children: [for (final s in _adminSections) _adminSectionWidget(s)],
           ),
         ),
       ],
@@ -525,7 +535,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     _workspaceController.dispose();
     _inventoryTabCtrl.dispose();
     _salesTabCtrl.dispose();
-    _moreTabCtrl.dispose();
+    _adminTabCtrl.dispose();
     _medicineController.dispose();
     _inventoryController.dispose();
     _batchController.dispose();
