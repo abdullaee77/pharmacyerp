@@ -194,6 +194,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     _reportController = ReportController(repository: reportRepo);
     _userController = UserController(repository: userRepo);
     _settingsController = SettingsController(repository: settingsRepo);
+    _settingsController.loadSettings(); // Loads store info & logo for TopBar
     _licenseController = LicenseController(repository: MockLicenseRepository());
     _backupController = BackupController();
     _backupController.onDataRestored = _reloadAllData;
@@ -313,8 +314,6 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     child: Text('You do not have permission to view this section.'),
   );
 
-// ... [Keep imports exactly the same] ...
-
   Widget _adminSectionWidget(AdminSection s) {
     switch (s) {
       case AdminSection.expenses:
@@ -358,8 +357,6 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
         return LicenseScreen(controller: _licenseController);
     }
   }
-
-// ... [Keep the rest of ShellScreen exactly the same] ...
 
   void _onRemoteDataChanged() {
     _reloadDebounce?.cancel();
@@ -412,6 +409,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     if (AdminSection.roles.isAllowedFor(user)) {
       _userController.loadRoles(silent: true);
     }
+    _settingsController.loadSettings(); // Refreshes top bar store info
   }
 
   Widget _wrap(Widget child) {
@@ -652,6 +650,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
                 TopBar(
                   onSearchTap: _openSearchDialog,
                   authController: widget.authController,
+                  settingsController: _settingsController,
                 ),
                 TopNavBar(
                   selectedItem: selected,
