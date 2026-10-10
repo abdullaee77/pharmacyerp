@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 import '../core/data/database_helper.dart';
 import '../core/network/api_client.dart';
 import '../core/network/api_server.dart';
@@ -19,25 +21,67 @@ class PharmacyApp extends StatefulWidget {
   State<PharmacyApp> createState() => _PharmacyAppState();
 }
 
-class _PharmacyAppState extends State<PharmacyApp> {
+class _PharmacyAppState extends State<PharmacyApp>
+    with WidgetsBindingObserver, WindowListener {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   AuthController? _authController;
   ApiServer? _autoServer;
   bool _dbReady = false;
   String? _dbError;
+  bool _isClosing = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // Register desktop window close listener
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.addListener(this);
+    }
+
     _initApp();
+  }
+
+  // ── Intercept desktop "X" (close) button ──
+  @override
+  void onWindowClose() async {
+    if (_isClosing) return;
+    _isClosing = true;
+
+    try {
+      // 1. Instantly hide the window — user sees it close immediately with 0 lag
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        await windowManager.hide();
+      }
+
+      // 2. Perform the backup in the background
+      await DatabaseHelper.createBackup();
+      debugPrint('[Auto-Backup] Close backup completed successfully.');
+    } catch (e) {
+      debugPrint('[Auto-Backup] Close backup error: $e');
+    } finally {
+      // 3. Cleanly and immediately terminate the application process
+      try {
+        _autoServer?.stop();
+      } catch (_) {}
+      exit(0);
+    }
+  }
+
+  // ── Mobile lifecycle fallback ──
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      DatabaseHelper.createBackup();
+    }
   }
 
   Future<void> _initApp() async {
     try {
-      // 1. Ensure local SQLite database is ready
       await DatabaseHelper.instance.database;
 
-      // 2. Load Network Configuration early to set client vs server/standalone mode
       final settingsRepo = SqliteSettingsRepository();
       final settingsResult = await settingsRepo.getAllSettings();
       settingsResult.fold(
@@ -57,18 +101,18 @@ class _PharmacyAppState extends State<PharmacyApp> {
           : SqliteAuthRepository();
 
       _authController = AuthController(authRepository: authRepo);
+      ApiClient.instance.onSessionExpired =
+      isClient ? _handleSessionExpired : null;
 
-      // 3. Handle session expiration on LAN clients
-      ApiClient.instance.onSessionExpired = isClient ? _handleSessionExpired : null;
-
-      // 4. Auto-start background API server if this PC is configured as Main Server
-      if (NetworkConfig.instance.isServer && NetworkConfig.instance.autoStartServer) {
+      if (NetworkConfig.instance.isServer &&
+          NetworkConfig.instance.autoStartServer) {
         _startAutoServer();
       }
 
-      if (mounted) {
-        setState(() => _dbReady = true);
-      }
+      // Auto-backup on startup (keeps latest 3 copies)
+      DatabaseHelper.createBackup();
+
+      if (mounted) setState(() => _dbReady = true);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -82,7 +126,6 @@ class _PharmacyAppState extends State<PharmacyApp> {
   void _handleSessionExpired() {
     if (_authController != null && _authController!.isAuthenticated) {
       _authController!.logout();
-      // Dismiss any open modals/dialogs and return cleanly to the login screen
       final navState = _navigatorKey.currentState;
       if (navState != null && navState.canPop()) {
         navState.popUntil((route) => route.isFirst);
@@ -98,13 +141,17 @@ class _PharmacyAppState extends State<PharmacyApp> {
         port: NetworkConfig.instance.port,
       );
       await _autoServer!.start();
-    } catch (_) {
-      // Non-fatal: user can still manage/start server from Network & LAN settings
-    }
+    } catch (_) {}
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.removeListener(this);
+    }
+
     ApiClient.instance.onSessionExpired = null;
     _autoServer?.stop();
     _authController?.dispose();
@@ -138,8 +185,6 @@ class _PharmacyAppState extends State<PharmacyApp> {
           if (user == null) {
             return LoginScreen(controller: _authController!);
           }
-          // Keyed by user so a new login always builds a fresh shell
-          // (menus, tabs, and cached pages never leak between users).
           return ShellScreen(
             key: ValueKey(user.id.value),
             authController: _authController!,

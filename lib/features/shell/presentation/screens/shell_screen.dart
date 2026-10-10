@@ -196,6 +196,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     _settingsController = SettingsController(repository: settingsRepo);
     _licenseController = LicenseController(repository: MockLicenseRepository());
     _backupController = BackupController();
+    _backupController.onDataRestored = _reloadAllData;
     _networkController = NetworkController(settingsRepo: settingsRepo);
 
     _moreSections =

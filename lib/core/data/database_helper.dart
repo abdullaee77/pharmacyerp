@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 import '../../features/users/domain/role.dart';
@@ -10,6 +12,7 @@ class DatabaseHelper {
 
   static const String _dbName = 'pharmasuite.db';
   static const int _dbVersion = 13;
+  static const int _maxBackups = 3;
 
   Database? _database;
 
@@ -19,16 +22,118 @@ class DatabaseHelper {
     return _database!;
   }
 
+  Future<String> get databaseFilePath async {
+    final dbPath = await getDatabasesPath();
+    return p.join(dbPath, _dbName);
+  }
+
+  /// Backup folder: Documents/PharmaSuite Backups/
+  static Future<String> get backupDirectoryPath async {
+    String basePath;
+    final userProfile =
+        Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
+    if (userProfile != null && userProfile.isNotEmpty) {
+      basePath = p.join(userProfile, 'Documents', 'PharmaSuite Backups');
+    } else {
+      final dbPath = await getDatabasesPath();
+      basePath = p.join(dbPath, 'backups');
+    }
+    final dir = Directory(basePath);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return basePath;
+  }
+
   Future<Database> _initDatabase() async {
     final dbPath = await getDatabasesPath();
     final path = p.join(dbPath, _dbName);
-    return openDatabase(
+    final db = await openDatabase(
       path,
       version: _dbVersion,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
+    await db.execute('PRAGMA journal_mode=WAL');
+    await db.execute('PRAGMA synchronous=NORMAL');
+    return db;
   }
+
+  Future<void> closeAndReopen() async {
+    await close();
+    _database = await _initDatabase();
+  }
+
+  /// Creates a backup in Documents/PharmaSuite Backups/
+  /// Uses live SQLite VACUUM INTO to avoid Windows file sharing lock errors.
+  /// Keeps only the last 3 backups, automatically deleting older ones.
+  static Future<String?> createBackup() async {
+    try {
+      final db = await DatabaseHelper.instance.database;
+      final backupDir = await backupDirectoryPath;
+
+      final now = DateTime.now();
+      final ts = '${now.year}'
+          '${now.month.toString().padLeft(2, '0')}'
+          '${now.day.toString().padLeft(2, '0')}_'
+          '${now.hour.toString().padLeft(2, '0')}'
+          '${now.minute.toString().padLeft(2, '0')}'
+          '${now.second.toString().padLeft(2, '0')}';
+      final fileName = 'PharmaSuite_Backup_$ts.db';
+      final targetPath = p.join(backupDir, fileName);
+
+      final targetFile = File(targetPath);
+      if (await targetFile.exists()) {
+        await targetFile.delete();
+      }
+
+      // 1. Live SQLite snapshot (prevents sharing lock conflicts on Windows)
+      final escapedPath = targetPath.replaceAll(r'\', '/');
+      try {
+        await db.execute("VACUUM INTO '$escapedPath'");
+      } catch (_) {
+        // Fallback: Checkpoint WAL and copy file
+        await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+        final dbPath = await DatabaseHelper.instance.databaseFilePath;
+        final sourceFile = File(dbPath);
+        await sourceFile.copy(targetPath);
+      }
+
+      // 2. Keep only the newest 3 backups
+      await _cleanupOldBackups(backupDir);
+
+      return targetPath;
+    } catch (e, stack) {
+      debugPrint('DatabaseHelper.createBackup error: $e\n$stack');
+      return null;
+    }
+  }
+
+  /// Deletes oldest backups so only [_maxBackups] remain.
+  static Future<void> _cleanupOldBackups(String backupDir) async {
+    try {
+      final dir = Directory(backupDir);
+      if (!await dir.exists()) return;
+
+      final files = await dir
+          .list()
+          .where((e) => e is File && e.path.toLowerCase().endsWith('.db'))
+          .cast<File>()
+          .toList();
+
+      if (files.length <= _maxBackups) return;
+
+      // Sort by filename timestamp ascending (oldest first)
+      files.sort((a, b) => a.path.compareTo(b.path));
+
+      final toDelete = files.take(files.length - _maxBackups);
+      for (final f in toDelete) {
+        await f.delete();
+      }
+    } catch (_) {}
+  }
+
+  // ──────────────────────────── Schema ────────────────────────────
 
   Future<void> _onCreate(Database db, int version) async {
     await _createMedicinesTable(db);
@@ -500,7 +605,6 @@ class DatabaseHelper {
     );
   }
 
-  /// Seeds default permissions for built-in roles, only if the role has none yet.
   Future<void> _seedBuiltInPermissions(Database db) async {
     for (final roleId in [
       RoleId.admin,
