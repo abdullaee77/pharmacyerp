@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../domain/user.dart';
 import '../../domain/auth_repository.dart';
+import '../../data/sqlite_auth_repository.dart';
 import '../../application/login_use_case.dart';
 
 class AuthController extends ChangeNotifier {
@@ -21,8 +22,49 @@ class AuthController extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
-  /// True when the user may manage users/roles (permission driven).
   bool get isAdmin => _currentUser?.canManageUsers ?? false;
+
+  Future<bool> hasAnyAdminRegistered() async {
+    if (_authRepository is SqliteAuthRepository) {
+      return await (_authRepository as SqliteAuthRepository).hasAnyAdmin();
+    }
+    return true; // Fallback if API/Server client is used
+  }
+
+  Future<bool> registerMasterAdmin(
+      String fullName,
+      String username,
+      String password,
+      ) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    if (_authRepository is SqliteAuthRepository) {
+      final res = await (_authRepository as SqliteAuthRepository).registerMasterAdmin(
+        fullName: fullName,
+        username: username,
+        password: password,
+      );
+
+      return res.fold(
+        onSuccess: (user) {
+          _currentUser = user;
+          _isLoading = false;
+          notifyListeners();
+          return true;
+        },
+        onFailure: (f) {
+          _errorMessage = f.message;
+          _isLoading = false;
+          notifyListeners();
+          return false;
+        },
+      );
+    }
+    _isLoading = false;
+    return false;
+  }
 
   Future<bool> login(String username, String password) async {
     _isLoading = true;

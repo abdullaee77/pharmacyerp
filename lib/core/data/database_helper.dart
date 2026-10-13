@@ -1,3 +1,5 @@
+// lib/core/data/database_helper.dart
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
@@ -27,7 +29,6 @@ class DatabaseHelper {
     return p.join(dbPath, _dbName);
   }
 
-  /// Backup folder: Documents/PharmaSuite Backups/
   static Future<String> get backupDirectoryPath async {
     String basePath;
     final userProfile =
@@ -64,9 +65,6 @@ class DatabaseHelper {
     _database = await _initDatabase();
   }
 
-  /// Creates a backup in Documents/PharmaSuite Backups/
-  /// Uses live SQLite VACUUM INTO to avoid Windows file sharing lock errors.
-  /// Keeps only the last 3 backups, automatically deleting older ones.
   static Future<String?> createBackup() async {
     try {
       final db = await DatabaseHelper.instance.database;
@@ -87,21 +85,17 @@ class DatabaseHelper {
         await targetFile.delete();
       }
 
-      // 1. Live SQLite snapshot (prevents sharing lock conflicts on Windows)
       final escapedPath = targetPath.replaceAll(r'\', '/');
       try {
         await db.execute("VACUUM INTO '$escapedPath'");
       } catch (_) {
-        // Fallback: Checkpoint WAL and copy file
         await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
         final dbPath = await DatabaseHelper.instance.databaseFilePath;
         final sourceFile = File(dbPath);
         await sourceFile.copy(targetPath);
       }
 
-      // 2. Keep only the newest 3 backups
       await _cleanupOldBackups(backupDir);
-
       return targetPath;
     } catch (e, stack) {
       debugPrint('DatabaseHelper.createBackup error: $e\n$stack');
@@ -109,7 +103,6 @@ class DatabaseHelper {
     }
   }
 
-  /// Deletes oldest backups so only [_maxBackups] remain.
   static Future<void> _cleanupOldBackups(String backupDir) async {
     try {
       final dir = Directory(backupDir);
@@ -123,7 +116,6 @@ class DatabaseHelper {
 
       if (files.length <= _maxBackups) return;
 
-      // Sort by filename timestamp ascending (oldest first)
       files.sort((a, b) => a.path.compareTo(b.path));
 
       final toDelete = files.take(files.length - _maxBackups);
@@ -132,8 +124,6 @@ class DatabaseHelper {
       }
     } catch (_) {}
   }
-
-  // ──────────────────────────── Schema ────────────────────────────
 
   Future<void> _onCreate(Database db, int version) async {
     await _createMedicinesTable(db);
@@ -587,22 +577,8 @@ class DatabaseHelper {
       );
     }
 
-    final hash = sha256.convert(utf8.encode('admin123')).toString();
-    await db.insert(
-      'users',
-      {
-        'id': 'usr_default_admin',
-        'full_name': 'System Administrator',
-        'username': 'admin',
-        'phone': '',
-        'role_id': 'role_admin',
-        'status': 'active',
-        'password_hash': hash,
-        'created_at': now,
-        'updated_at': now,
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
+    // ── FIXED: No longer auto-seeding usr_default_admin (admin / admin123) ──
+    // This allows Master Admin Signup view to present correctly on fresh setup.
   }
 
   Future<void> _seedBuiltInPermissions(Database db) async {

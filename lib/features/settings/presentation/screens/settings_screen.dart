@@ -39,10 +39,10 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late String _selectedPrinter;
   late String _selectedLayout;
-  late String _receiptDensity; // 'standard' or 'compact'
+  late String _receiptDensity;
   late double _marginLeftMm;
   late double _marginRightMm;
-  late String _fontScaleChoice; // '0.85', '1.0', '1.15'
+  late String _fontScaleChoice;
   late bool _autoPrint;
   late bool _directPrint;
   late String _logoPath;
@@ -55,6 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<Printer> _printers = [];
   bool _loadingPrinters = true;
   bool _isInitialized = false;
+  bool _printingAvailable = true; // Track if printing plugin works
 
   bool get _canManage => PermissionGate.allow(
       widget.authController.currentUser,
@@ -64,11 +65,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    widget.controller.loadSettings().then((_) {
-      _initValues();
-      if (widget.mode == SettingsMode.printer) {
-        _detectPrinters();
-      }
+    // FIX: Defer loadSettings to after the first frame is built
+    // This prevents "setState() or markNeedsBuild() called during build"
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.controller.loadSettings().then((_) {
+        if (!mounted) return;
+        _initValues();
+        if (widget.mode == SettingsMode.printer) {
+          _detectPrinters();
+        }
+      });
     });
   }
 
@@ -127,6 +133,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         setState(() {
           _printers = printers;
           _loadingPrinters = false;
+          _printingAvailable = true;
           if (_selectedPrinter.isEmpty && printers.isNotEmpty) {
             final defaultPrinter = printers.firstWhere(
                   (p) => p.isDefault,
@@ -137,7 +144,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _loadingPrinters = false);
+      if (mounted) {
+        setState(() {
+          _loadingPrinters = false;
+          _printingAvailable = false;
+        });
+      }
     }
   }
 
@@ -520,7 +532,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: AppSpacing.lg),
 
-                    // ── Margin Tuning Sliders (Extended to 15.0 mm) ──
                     Text('Printer Driver Margins (Offset Tuning)',
                         style: AppTypography.subtitle.copyWith(fontSize: 14)),
                     Text(
@@ -539,8 +550,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               Slider(
                                 value: _marginLeftMm.clamp(0.0, 15.0),
                                 min: 0.0,
-                                max: 15.0, // Extended range to 15mm
-                                divisions: 30, // 0.5mm increments
+                                max: 15.0,
+                                divisions: 30,
                                 label: '${_marginLeftMm.toStringAsFixed(1)} mm',
                                 onChanged: readOnly
                                     ? null
@@ -559,8 +570,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               Slider(
                                 value: _marginRightMm.clamp(0.0, 15.0),
                                 min: 0.0,
-                                max: 15.0, // Extended range to 15mm
-                                divisions: 30, // 0.5mm increments
+                                max: 15.0,
+                                divisions: 30,
                                 label: '${_marginRightMm.toStringAsFixed(1)} mm',
                                 onChanged: readOnly
                                     ? null
@@ -693,7 +704,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
 
-        // Right Column: Dynamic Tight Vector PDF Preview
+        // Right Column: Live PDF Preview
         Expanded(
           flex: 4,
           child: Column(
@@ -719,9 +730,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       border: Border.all(color: AppColors.border),
                     ),
                     clipBehavior: Clip.antiAlias,
-                    child: PdfPreview(
+                    // FIX: Gracefully handle missing printing plugin
+                    child: _printingAvailable
+                        ? PdfPreview(
                       build: (format) => _generatePreviewPdf(),
-                      dpi: 300, // Crisp 300 DPI high-res vector rendering
+                      dpi: 300,
                       maxPageWidth: _selectedLayout == 'thermal58' ? 220 : 280,
                       allowPrinting: false,
                       allowSharing: false,
@@ -731,7 +744,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       padding: EdgeInsets.zero,
                       scrollViewDecoration: const BoxDecoration(color: Colors.white),
                       pdfPreviewPageDecoration: const BoxDecoration(color: Colors.white),
-                    ),
+                      onError: (context, error) {
+                        // If PdfPreview fails at runtime, show fallback
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) {
+                            setState(() => _printingAvailable = false);
+                          }
+                        });
+                        return _buildPreviewFallback();
+                      },
+                    )
+                        : _buildPreviewFallback(),
                   ),
                 ),
               ),
@@ -739,6 +762,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  // FIX: Fallback widget when printing plugin is not available
+  Widget _buildPreviewFallback() {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: AppColors.surfaceVariant,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.print_disabled_rounded,
+              size: 48, color: AppColors.textSecondary),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'Live preview unavailable.',
+            style: AppTypography.subtitle.copyWith(
+              color: AppColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: Text(
+              'The printing plugin requires a full rebuild.\n'
+                  'Run: flutter clean && flutter run -d windows',
+              textAlign: TextAlign.center,
+              style: AppTypography.caption.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          AppButton(
+            label: 'Retry',
+            icon: Icons.refresh_rounded,
+            variant: AppButtonVariant.outlined,
+            size: AppButtonSize.small,
+            onPressed: () {
+              setState(() => _printingAvailable = true);
+              _detectPrinters();
+            },
+          ),
+        ],
+      ),
     );
   }
 

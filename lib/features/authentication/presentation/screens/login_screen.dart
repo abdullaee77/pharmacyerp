@@ -4,14 +4,16 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/theme/app_elevation.dart';
-import '../controllers/auth_controller.dart';
+import '../controllers/auth_controller.dart'; // Correct relative import path
 
 class LoginScreen extends StatefulWidget {
   final AuthController controller;
+  final VoidCallback? onResetRequested;
 
   const LoginScreen({
     super.key,
     required this.controller,
+    this.onResetRequested,
   });
 
   @override
@@ -94,8 +96,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               padding: const EdgeInsets.all(AppSpacing.sm),
                               decoration: BoxDecoration(
                                 color: AppColors.surface.withValues(alpha: 0.15),
-                                borderRadius:
-                                BorderRadius.circular(AppRadius.md),
+                                borderRadius: BorderRadius.circular(AppRadius.md),
                               ),
                               child: const Icon(
                                 Icons.local_pharmacy_rounded,
@@ -171,7 +172,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Sign in with your assigned username and password.',
+                            'Sign in with your administrator or staff credentials.',
                             style: AppTypography.bodySmall,
                           ),
                           const SizedBox(height: AppSpacing.xl),
@@ -188,11 +189,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                 padding: const EdgeInsets.all(AppSpacing.md),
                                 decoration: BoxDecoration(
                                   color: AppColors.errorSurface,
-                                  borderRadius:
-                                  BorderRadius.circular(AppRadius.md),
+                                  borderRadius: BorderRadius.circular(AppRadius.md),
                                   border: Border.all(
-                                    color: AppColors.errorLight
-                                        .withValues(alpha: 0.3),
+                                    color: AppColors.errorLight.withValues(alpha: 0.3),
                                   ),
                                 ),
                                 child: Row(
@@ -227,8 +226,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               hintText: 'e.g. admin',
                             ),
                             onChanged: (_) => widget.controller.clearError(),
-                            onFieldSubmitted: (_) =>
-                                _passwordFocus.requestFocus(),
+                            onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
                             validator: (v) => v == null || v.trim().isEmpty
                                 ? 'Username required.'
                                 : null,
@@ -241,8 +239,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             textInputAction: TextInputAction.done,
                             decoration: InputDecoration(
                               labelText: 'Password',
-                              prefixIcon:
-                              const Icon(Icons.lock_outline_rounded),
+                              prefixIcon: const Icon(Icons.lock_outline_rounded),
                               suffixIcon: IconButton(
                                 icon: Icon(
                                   _obscurePassword
@@ -279,8 +276,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   width: 20,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    valueColor:
-                                    AlwaysStoppedAnimation<Color>(
+                                    valueColor: AlwaysStoppedAnimation<Color>(
                                       AppColors.textInverse,
                                     ),
                                   ),
@@ -289,13 +285,28 @@ class _LoginScreenState extends State<LoginScreen> {
                               );
                             },
                           ),
-                          const SizedBox(height: AppSpacing.xl),
-                          Text(
-                            'Default admin (first install): admin / admin123\n'
-                                'Create more users from More → Users after login.',
-                            style: AppTypography.caption,
-                            textAlign: TextAlign.center,
-                          ),
+                          const SizedBox(height: AppSpacing.lg),
+
+                          // Reset / Deactivate Option for testers
+                          if (widget.onResetRequested != null)
+                            Center(
+                              child: TextButton.icon(
+                                onPressed: widget.onResetRequested,
+                                icon: const Icon(
+                                  Icons.lock_reset_rounded,
+                                  size: 16,
+                                  color: AppColors.textSecondary,
+                                ),
+                                label: const Text(
+                                  'Deactivate & Return to Onboarding (Welcome Screen)',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.textSecondary,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),

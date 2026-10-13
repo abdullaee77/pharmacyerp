@@ -1,0 +1,844 @@
+﻿========== FILE: lib/main.dart ==========
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:window_manager/window_manager.dart';
+import 'app/app.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize SQLite FFI database factory for Windows/Linux desktop
+  if (Platform.isWindows || Platform.isLinux) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
+
+  // Initialize WindowManager on desktop to intercept 'X' close button
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    await windowManager.ensureInitialized();
+
+    const windowOptions = WindowOptions(
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      title: 'PharmaSuite ERP',
+    );
+
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+
+    // Prevent immediate termination so we can complete DB backup first
+    await windowManager.setPreventClose(true);
+  }
+
+  runApp(const PharmacyApp());
+}
+
+========== FILE: lib/app/app.dart ==========
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
+import '../core/data/database_helper.dart';
+import '../core/network/api_client.dart';
+import '../core/network/api_server.dart';
+import '../core/network/connection_tracker.dart';
+import '../core/network/network_config.dart';
+import '../core/theme/app_theme.dart';
+import '../features/authentication/data/http_auth_repository.dart';
+import '../features/authentication/data/sqlite_auth_repository.dart';
+import '../features/authentication/presentation/controllers/auth_controller.dart';
+import '../features/authentication/presentation/screens/login_screen.dart';
+import '../features/settings/data/sqlite_settings_repository.dart';
+import '../features/shell/presentation/screens/shell_screen.dart';
+
+class PharmacyApp extends StatefulWidget {
+  const PharmacyApp({super.key});
+
+  @override
+  State<PharmacyApp> createState() => _PharmacyAppState();
+}
+
+class _PharmacyAppState extends State<PharmacyApp>
+    with WidgetsBindingObserver, WindowListener {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  AuthController? _authController;
+  ApiServer? _autoServer;
+  bool _dbReady = false;
+  String? _dbError;
+  bool _isClosing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // Register desktop window close listener
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.addListener(this);
+    }
+
+    _initApp();
+  }
+
+  // â”€â”€ Intercept desktop "X" (close) button â”€â”€
+  @override
+  void onWindowClose() async {
+    if (_isClosing) return;
+    _isClosing = true;
+
+    try {
+      // 1. Instantly hide the window â€” user sees it close immediately with 0 lag
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        await windowManager.hide();
+      }
+
+      // 2. Perform the backup in the background
+      await DatabaseHelper.createBackup();
+      debugPrint('[Auto-Backup] Close backup completed successfully.');
+    } catch (e) {
+      debugPrint('[Auto-Backup] Close backup error: $e');
+    } finally {
+      // 3. Cleanly and immediately terminate the application process
+      try {
+        _autoServer?.stop();
+      } catch (_) {}
+      exit(0);
+    }
+  }
+
+  // â”€â”€ Mobile lifecycle fallback â”€â”€
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      DatabaseHelper.createBackup();
+    }
+  }
+
+  Future<void> _initApp() async {
+    try {
+      await DatabaseHelper.instance.database;
+
+      final settingsRepo = SqliteSettingsRepository();
+      final settingsResult = await settingsRepo.getAllSettings();
+      settingsResult.fold(
+        onSuccess: (settings) {
+          final map = {for (final s in settings) s.key: s.value};
+          NetworkConfig.instance.loadFromSettings(map);
+        },
+        onFailure: (_) {},
+      );
+
+      final isClient = NetworkConfig.instance.isClient;
+      final authRepo = isClient
+          ? HttpAuthRepository(
+        api: ApiClient.instance,
+        localFallback: SqliteAuthRepository(),
+      )
+          : SqliteAuthRepository();
+
+      _authController = AuthController(authRepository: authRepo);
+      ApiClient.instance.onSessionExpired =
+      isClient ? _handleSessionExpired : null;
+
+      if (NetworkConfig.instance.isServer &&
+          NetworkConfig.instance.autoStartServer) {
+        _startAutoServer();
+      }
+
+      // Auto-backup on startup (keeps latest 3 copies)
+      DatabaseHelper.createBackup();
+
+      if (mounted) setState(() => _dbReady = true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _dbReady = false;
+          _dbError = e.toString();
+        });
+      }
+    }
+  }
+
+  void _handleSessionExpired() {
+    if (_authController != null && _authController!.isAuthenticated) {
+      _authController!.logout();
+      final navState = _navigatorKey.currentState;
+      if (navState != null && navState.canPop()) {
+        navState.popUntil((route) => route.isFirst);
+      }
+    }
+  }
+
+  Future<void> _startAutoServer() async {
+    try {
+      _autoServer = ApiServer(
+        dbHelper: DatabaseHelper.instance,
+        tracker: ConnectionTracker(),
+        port: NetworkConfig.instance.port,
+      );
+      await _autoServer!.start();
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.removeListener(this);
+    }
+
+    ApiClient.instance.onSessionExpired = null;
+    _autoServer?.stop();
+    _authController?.dispose();
+    DatabaseHelper.instance.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'PharmaSuite ERP',
+      debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
+      theme: AppTheme.light,
+      home: !_dbReady || _authController == null
+          ? Scaffold(
+        body: Center(
+          child: _dbError != null
+              ? Text(
+            'Database initialization error:\n$_dbError',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.red),
+          )
+              : const CircularProgressIndicator(),
+        ),
+      )
+          : ListenableBuilder(
+        listenable: _authController!,
+        builder: (context, _) {
+          final user = _authController!.currentUser;
+          if (user == null) {
+            return LoginScreen(controller: _authController!);
+          }
+          return ShellScreen(
+            key: ValueKey(user.id.value),
+            authController: _authController!,
+          );
+        },
+      ),
+    );
+  }
+}
+
+========== FILE: lib/features/authentication/domain/user.dart ==========
+import '../../../core/domain/entity.dart';
+import '../../../core/domain/value_object.dart';
+import '../../users/domain/role.dart';
+
+class UserId extends ValueObject {
+  final String value;
+  const UserId(this.value);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+          other is UserId && runtimeType == other.runtimeType && value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() => value;
+}
+
+enum UserRole {
+  admin(label: 'Administrator', canManageUsers: true, canAdjustStock: true),
+  manager(label: 'Manager', canManageUsers: true, canAdjustStock: true),
+  pharmacist(label: 'Pharmacist', canManageUsers: false, canAdjustStock: true),
+  cashier(label: 'Cashier / POS Operator', canManageUsers: false, canAdjustStock: false);
+
+  final String label;
+  final bool canManageUsers;
+  final bool canAdjustStock;
+
+  const UserRole({
+    required this.label,
+    required this.canManageUsers,
+    required this.canAdjustStock,
+  });
+
+  /// Maps by role ID (never by name). Custom roles fall back to cashier and
+  /// rely entirely on their stored permissions.
+  static UserRole fromRoleId(String roleId) {
+    switch (roleId) {
+      case 'role_admin':
+        return UserRole.admin;
+      case 'role_manager':
+        return UserRole.manager;
+      case 'role_pharmacist':
+        return UserRole.pharmacist;
+      default:
+        return UserRole.cashier;
+    }
+  }
+}
+
+class User extends Entity<UserId> {
+  final String username;
+  final String fullName;
+  final UserRole role;
+  final String email;
+  final String roleId;
+  final String roleName;
+  final Set<Permission> permissions;
+
+  const User({
+    required super.id,
+    required this.username,
+    required this.fullName,
+    required this.role,
+    this.email = '',
+    this.roleId = '',
+    this.roleName = '',
+    this.permissions = const {},
+  });
+
+  /// Admin always has everything, so an admin can never lock themselves out.
+  bool can(PermissionCategory cat, PermissionAction act) =>
+      role == UserRole.admin || permissions.contains(Permission(cat, act));
+
+  bool hasAnyIn(PermissionCategory cat) =>
+      role == UserRole.admin || permissions.any((p) => p.category == cat);
+
+  bool get canManageUsers => can(PermissionCategory.users, PermissionAction.manage);
+  bool get canAdjustStock => can(PermissionCategory.inventory, PermissionAction.adjust);
+
+  @override
+  String toString() => 'User($username, Role: ${roleName.isEmpty ? role.name : roleName})';
+}
+
+========== FILE: lib/features/authentication/domain/auth_repository.dart ==========
+import '../../../core/result/result.dart';
+import 'user.dart';
+
+/// Pure Domain repository interface defining authentication contracts.
+///
+/// Implemented inside the infrastructure/data layer. Zero dependencies on UI.
+abstract class AuthRepository {
+  /// Authenticates a user using credentials.
+  Future<Result<User>> login(String username, String password);
+
+  /// Destroys current localized session.
+  Future<Result<void>> logout();
+
+  /// Gets currently cached or authenticated user, if any.
+  Future<Result<User?>> getCurrentSession();
+}
+
+========== FILE: lib/features/authentication/data/sqlite_auth_repository.dart ==========
+// lib/features/authentication/data/sqlite_auth_repository.dart
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import 'package:sqflite/sqflite.dart';
+import '../../../core/data/database_helper.dart';
+import '../../../core/error/failures.dart';
+import '../../../core/result/result.dart';
+import '../../users/domain/role.dart';
+import '../domain/auth_repository.dart';
+import '../domain/user.dart';
+
+/// Real SQLite authentication against local users + roles tables.
+class SqliteAuthRepository implements AuthRepository {
+  final DatabaseHelper _dbHelper;
+  User? _currentUser;
+
+  SqliteAuthRepository({DatabaseHelper? dbHelper})
+      : _dbHelper = dbHelper ?? DatabaseHelper.instance;
+
+  Future<Database> get _db => _dbHelper.database;
+
+  static String hashPassword(String password) {
+    // Trim strictly before encoding to stay unified with HttpAuthRepository
+    final bytes = utf8.encode(password.trim());
+    return sha256.convert(bytes).toString();
+  }
+
+  @override
+  Future<Result<User>> login(String username, String password) async {
+    try {
+      final db = await _db;
+      final hash = hashPassword(password);
+
+      final rows = await db.rawQuery('''
+        SELECT u.*, r.name AS role_name
+        FROM users u
+        LEFT JOIN roles r ON u.role_id = r.id
+        WHERE LOWER(u.username) = LOWER(?)
+        LIMIT 1
+      ''', [username.trim()]);
+
+      if (rows.isEmpty) {
+        return const Failure(
+          AuthenticationFailure(message: 'Invalid username or password.'),
+        );
+      }
+
+      final row = rows.first;
+      final status = row['status'] as String? ?? 'active';
+      final storedHash = row['password_hash'] as String? ?? '';
+
+      if (status.toLowerCase() == 'inactive') {
+        return const Failure(
+          AuthenticationFailure(message: 'This account is inactive. Contact an administrator.'),
+        );
+      }
+      if (status.toLowerCase() == 'locked') {
+        return const Failure(
+          AuthenticationFailure(message: 'This account is locked. Contact an administrator.'),
+        );
+      }
+
+      if (storedHash != hash) {
+        return const Failure(
+          AuthenticationFailure(message: 'Invalid username or password.'),
+        );
+      }
+
+      await db.update(
+        'users',
+        {
+          'last_login_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+
+      final roleId = row['role_id'] as String? ?? '';
+      final role = UserRole.fromRoleId(roleId);
+
+      final permRows = await db.query(
+        'role_permissions',
+        where: 'role_id = ?',
+        whereArgs: [roleId],
+      );
+
+      final user = User(
+        id: UserId(row['id'] as String),
+        username: row['username'] as String,
+        fullName: row['full_name'] as String,
+        email: '',
+        role: role,
+        roleId: roleId,
+        roleName: row['role_name'] as String? ?? role.label,
+        permissions: permissionsFromRows(permRows),
+      );
+
+      _currentUser = user;
+      return Success(user);
+    } catch (e) {
+      return Failure(
+        DatabaseFailure(message: 'Login failed: $e'),
+      );
+    }
+  }
+
+  @override
+  Future<Result<void>> logout() async {
+    _currentUser = null;
+    return const Success(null);
+  }
+
+  @override
+  Future<Result<User?>> getCurrentSession() async {
+    return Success(_currentUser);
+  }
+}
+
+========== FILE: lib/features/authentication/presentation/controllers/auth_controller.dart ==========
+import 'package:flutter/material.dart';
+import '../../domain/user.dart';
+import '../../domain/auth_repository.dart';
+import '../../application/login_use_case.dart';
+
+class AuthController extends ChangeNotifier {
+  final AuthRepository _authRepository;
+  final LoginUseCase _loginUseCase;
+
+  AuthController({
+    required AuthRepository authRepository,
+  })  : _authRepository = authRepository,
+        _loginUseCase = LoginUseCase(authRepository);
+
+  User? _currentUser;
+  bool _isLoading = false;
+  String? _errorMessage;
+
+  User? get currentUser => _currentUser;
+  bool get isAuthenticated => _currentUser != null;
+  bool get isLoading => _isLoading;
+  String? get errorMessage => _errorMessage;
+
+  /// True when the user may manage users/roles (permission driven).
+  bool get isAdmin => _currentUser?.canManageUsers ?? false;
+
+  Future<bool> login(String username, String password) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    final result = await _loginUseCase.execute(username, password);
+
+    _isLoading = false;
+    return result.fold(
+      onSuccess: (user) {
+        _currentUser = user;
+        notifyListeners();
+        return true;
+      },
+      onFailure: (failure) {
+        _errorMessage = failure.message;
+        notifyListeners();
+        return false;
+      },
+    );
+  }
+
+  Future<void> logout() async {
+    _isLoading = true;
+    notifyListeners();
+
+    await _authRepository.logout();
+
+    _currentUser = null;
+    _isLoading = false;
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  void clearError() {
+    if (_errorMessage != null) {
+      _errorMessage = null;
+      notifyListeners();
+    }
+  }
+}
+
+========== FILE: lib/features/authentication/presentation/screens/login_screen.dart ==========
+import 'package:flutter/material.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/theme/app_radius.dart';
+import '../../../../core/theme/app_typography.dart';
+import '../../../../core/theme/app_elevation.dart';
+import '../controllers/auth_controller.dart';
+
+class LoginScreen extends StatefulWidget {
+  final AuthController controller;
+
+  const LoginScreen({
+    super.key,
+    required this.controller,
+  });
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
+
+  bool _obscurePassword = true;
+  final _usernameFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    _usernameFocus.dispose();
+    _passwordFocus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    widget.controller.clearError();
+    if (_formKey.currentState?.validate() ?? false) {
+      final success = await widget.controller.login(
+        _usernameController.text,
+        _passwordController.text,
+      );
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Welcome back, ${widget.controller.currentUser!.fullName}',
+            ),
+            backgroundColor: AppColors.success,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: Center(
+        child: SingleChildScrollView(
+          child: Container(
+            width: 820,
+            height: 520,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.xl),
+              boxShadow: AppElevation.shadowLg,
+              border: Border.all(color: AppColors.border, width: 1),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 11,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(AppRadius.xl - 1),
+                        bottomLeft: Radius.circular(AppRadius.xl - 1),
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(AppSpacing.xxl),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(AppSpacing.sm),
+                              decoration: BoxDecoration(
+                                color: AppColors.surface.withValues(alpha: 0.15),
+                                borderRadius:
+                                BorderRadius.circular(AppRadius.md),
+                              ),
+                              child: const Icon(
+                                Icons.local_pharmacy_rounded,
+                                color: AppColors.textInverse,
+                                size: 28,
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Text(
+                              'PHARMASUITE',
+                              style: AppTypography.sectionTitle.copyWith(
+                                color: AppColors.textInverse,
+                                letterSpacing: 1.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Spacer(),
+                        Text(
+                          'Comprehensive Pharmacy Information System',
+                          style: AppTypography.display.copyWith(
+                            fontSize: 26,
+                            color: AppColors.textInverse,
+                            height: 1.3,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        Text(
+                          'Secure offline-first database. Manage stock, sales, purchases, and accounts.',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textInverse.withValues(alpha: 0.7),
+                            fontSize: 13,
+                          ),
+                        ),
+                        const Spacer(),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.verified_user_outlined,
+                              size: 14,
+                              color: AppColors.accentLight,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Local SQLite authentication',
+                              style: AppTypography.caption.copyWith(
+                                color: AppColors.textInverse.withValues(alpha: 0.6),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 12,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xxl,
+                      vertical: AppSpacing.xl,
+                    ),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Terminal Access Portal',
+                            style: AppTypography.pageTitle,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Sign in with your assigned username and password.',
+                            style: AppTypography.bodySmall,
+                          ),
+                          const SizedBox(height: AppSpacing.xl),
+                          ListenableBuilder(
+                            listenable: widget.controller,
+                            builder: (context, _) {
+                              if (widget.controller.errorMessage == null) {
+                                return const SizedBox.shrink();
+                              }
+                              return Container(
+                                margin: const EdgeInsets.only(
+                                  bottom: AppSpacing.lg,
+                                ),
+                                padding: const EdgeInsets.all(AppSpacing.md),
+                                decoration: BoxDecoration(
+                                  color: AppColors.errorSurface,
+                                  borderRadius:
+                                  BorderRadius.circular(AppRadius.md),
+                                  border: Border.all(
+                                    color: AppColors.errorLight
+                                        .withValues(alpha: 0.3),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.error_outline_rounded,
+                                      color: AppColors.error,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: AppSpacing.sm),
+                                    Expanded(
+                                      child: Text(
+                                        widget.controller.errorMessage!,
+                                        style: AppTypography.bodySmall.copyWith(
+                                          color: AppColors.error,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                          TextFormField(
+                            controller: _usernameController,
+                            focusNode: _usernameFocus,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: 'Username',
+                              prefixIcon: Icon(Icons.person_outline_rounded),
+                              hintText: 'e.g. admin',
+                            ),
+                            onChanged: (_) => widget.controller.clearError(),
+                            onFieldSubmitted: (_) =>
+                                _passwordFocus.requestFocus(),
+                            validator: (v) => v == null || v.trim().isEmpty
+                                ? 'Username required.'
+                                : null,
+                          ),
+                          const SizedBox(height: AppSpacing.lg),
+                          TextFormField(
+                            controller: _passwordController,
+                            focusNode: _passwordFocus,
+                            obscureText: _obscurePassword,
+                            textInputAction: TextInputAction.done,
+                            decoration: InputDecoration(
+                              labelText: 'Password',
+                              prefixIcon:
+                              const Icon(Icons.lock_outline_rounded),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                  size: 18,
+                                ),
+                                onPressed: () {
+                                  setState(
+                                        () => _obscurePassword = !_obscurePassword,
+                                  );
+                                },
+                              ),
+                            ),
+                            onChanged: (_) => widget.controller.clearError(),
+                            onFieldSubmitted: (_) => _submit(),
+                            validator: (v) => v == null || v.trim().isEmpty
+                                ? 'Password required.'
+                                : null,
+                          ),
+                          const SizedBox(height: AppSpacing.xl),
+                          ListenableBuilder(
+                            listenable: widget.controller,
+                            builder: (context, _) {
+                              final isLoading = widget.controller.isLoading;
+                              return ElevatedButton(
+                                onPressed: isLoading ? null : _submit,
+                                style: ElevatedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(44),
+                                ),
+                                child: isLoading
+                                    ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor:
+                                    AlwaysStoppedAnimation<Color>(
+                                      AppColors.textInverse,
+                                    ),
+                                  ),
+                                )
+                                    : const Text('Unlock Workspace'),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: AppSpacing.xl),
+                          Text(
+                            'Default admin (first install): admin / admin123\n'
+                                'Create more users from More â†’ Users after login.',
+                            style: AppTypography.caption,
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
