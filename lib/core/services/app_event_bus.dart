@@ -1,13 +1,34 @@
 // lib/core/services/app_event_bus.dart
+
 import 'dart:async';
 
 /// Global events that trigger reactiveness across separated feature domains.
 enum AppEvent {
+  // Sales
   saleCompleted,
+  saleReturned,
+
+  // Purchases
   purchaseCompleted,
+  purchaseReturned,
+
+  // Inventory
+  inventoryAdjusted,
+  batchChanged,
+
+  // Expenses
   expenseAdded,
+
+  // Accounts
+  accountChanged,
+
+  // Customers & Suppliers
   customerUpdated,
+  customerPaymentRecorded,
   supplierUpdated,
+  supplierPaymentRecorded,
+
+  // Medicines
   medicineUpdated,
 }
 
@@ -15,7 +36,8 @@ class AppEventBus {
   AppEventBus._();
   static final AppEventBus instance = AppEventBus._();
 
-  final StreamController<AppEvent> _streamController = StreamController<AppEvent>.broadcast();
+  final StreamController<AppEvent> _streamController =
+  StreamController<AppEvent>.broadcast();
 
   /// Listen to this stream to catch global app updates.
   Stream<AppEvent> get stream => _streamController.stream;
@@ -23,5 +45,9 @@ class AppEventBus {
   /// Fire an event to notify listeners of a state change.
   void fire(AppEvent event) {
     _streamController.add(event);
+  }
+
+  void dispose() {
+    _streamController.close();
   }
 }

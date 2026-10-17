@@ -14,6 +14,7 @@ class AccountController extends ChangeNotifier {
   final GetAccountLedgerUseCase _getLedger;
 
   StreamSubscription<AppEvent>? _eventSub;
+  AccountId? _activeAccountId;
 
   AccountController({required AccountRepository repository})
       : _getAccounts = GetAccountsUseCase(repository),
@@ -21,16 +22,23 @@ class AccountController extends ChangeNotifier {
         _update = UpdateAccountUseCase(repository),
         _delete = DeleteAccountUseCase(repository),
         _getLedger = GetAccountLedgerUseCase(repository) {
-    // Automatically reload accounts whenever an event occurs across the app (sales, purchases, expenses)
-    _eventSub = AppEventBus.instance.stream.listen((_) {
-      loadAccounts(silent: true);
+    _eventSub = AppEventBus.instance.stream.listen((event) {
+      // Account balances change on: sales (paid portion), purchases (paid portion),
+      // expenses, supplier/customer payments, and direct account edits.
+      if (event == AppEvent.saleCompleted ||
+          event == AppEvent.saleReturned ||
+          event == AppEvent.purchaseCompleted ||
+          event == AppEvent.purchaseReturned ||
+          event == AppEvent.expenseAdded ||
+          event == AppEvent.supplierPaymentRecorded ||
+          event == AppEvent.customerPaymentRecorded ||
+          event == AppEvent.accountChanged) {
+        loadAccounts(silent: true);
+        if (_activeAccountId != null) {
+          _reloadActiveLedger();
+        }
+      }
     });
-  }
-
-  @override
-  void dispose() {
-    _eventSub?.cancel();
-    super.dispose();
   }
 
   List<AccountWithBalance> _accounts = [];
@@ -43,6 +51,7 @@ class AccountController extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   List<FinancialTransactionRow> get activeLedger => _activeLedger;
+  AccountId? get activeAccountId => _activeAccountId;
 
   Future<void> loadAccounts({bool silent = false}) async {
     if (!silent) {
@@ -79,7 +88,7 @@ class AccountController extends ChangeNotifier {
     final r = await _create.execute(a);
     return r.fold(onSuccess: (_) {
       loadAccounts();
-      AppEventBus.instance.fire(AppEvent.saleCompleted);
+      AppEventBus.instance.fire(AppEvent.accountChanged);
       return null;
     }, onFailure: (f) => f.message);
   }
@@ -88,7 +97,7 @@ class AccountController extends ChangeNotifier {
     final r = await _update.execute(a);
     return r.fold(onSuccess: (_) {
       loadAccounts();
-      AppEventBus.instance.fire(AppEvent.saleCompleted);
+      AppEventBus.instance.fire(AppEvent.accountChanged);
       return null;
     }, onFailure: (f) => f.message);
   }
@@ -97,15 +106,21 @@ class AccountController extends ChangeNotifier {
     final r = await _delete.execute(id);
     return r.fold(onSuccess: (_) {
       loadAccounts();
-      AppEventBus.instance.fire(AppEvent.saleCompleted);
+      AppEventBus.instance.fire(AppEvent.accountChanged);
       return null;
     }, onFailure: (f) => f.message);
   }
 
   Future<void> loadLedger(AccountId id) async {
+    _activeAccountId = id;
     _activeLedger = [];
     notifyListeners();
-    final r = await _getLedger.execute(id);
+    await _reloadActiveLedger();
+  }
+
+  Future<void> _reloadActiveLedger() async {
+    if (_activeAccountId == null) return;
+    final r = await _getLedger.execute(_activeAccountId!);
     r.fold(
       onSuccess: (data) {
         _activeLedger = data;
@@ -116,5 +131,11 @@ class AccountController extends ChangeNotifier {
         notifyListeners();
       },
     );
+  }
+
+  @override
+  void dispose() {
+    _eventSub?.cancel();
+    super.dispose();
   }
 }

@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:pharmacy/core/services/app_event_bus.dart';
 import '../../../inventory/domain/batch_repository.dart';
 import '../../../inventory/domain/inventory_repository.dart';
 import '../../../suppliers/domain/supplier_repository.dart';
@@ -12,6 +14,8 @@ class PurchaseController extends ChangeNotifier {
   final GetPurchasesUseCase _getPurchases;
   final CreatePurchaseReturnUseCase _createReturn;
   final PurchaseRepository _purchaseRepository;
+
+  StreamSubscription<AppEvent>? _eventSubscription;
 
   PurchaseController({
     required PurchaseRepository purchaseRepository,
@@ -29,7 +33,15 @@ class PurchaseController extends ChangeNotifier {
         _createReturn = CreatePurchaseReturnUseCase(
           purchaseRepository: purchaseRepository,
           inventoryRepository: inventoryRepository,
-        );
+        ) {
+    _eventSubscription = AppEventBus.instance.stream.listen((event) {
+      if (event == AppEvent.purchaseCompleted ||
+          event == AppEvent.purchaseReturned ||
+          event == AppEvent.supplierPaymentRecorded) {
+        loadPurchases(silent: true);
+      }
+    });
+  }
 
   List<Purchase> _purchases = [];
   bool _isLoading = false;
@@ -83,6 +95,16 @@ class PurchaseController extends ChangeNotifier {
     return result.fold(
       onSuccess: (_) {
         loadPurchases();
+        // Broadcast: inventory/dashboard/suppliers/accounts all react
+        AppEventBus.instance.fire(AppEvent.purchaseCompleted);
+        AppEventBus.instance.fire(AppEvent.inventoryAdjusted);
+        AppEventBus.instance.fire(AppEvent.batchChanged);
+        if (accountId != null && amountPaidPaisa > 0) {
+          AppEventBus.instance.fire(AppEvent.accountChanged);
+          AppEventBus.instance.fire(AppEvent.supplierPaymentRecorded);
+        } else {
+          AppEventBus.instance.fire(AppEvent.supplierUpdated);
+        }
         return null;
       },
       onFailure: (f) => f.message,
@@ -98,6 +120,10 @@ class PurchaseController extends ChangeNotifier {
     return result.fold(
       onSuccess: (_) {
         loadPurchases();
+        AppEventBus.instance.fire(AppEvent.purchaseReturned);
+        AppEventBus.instance.fire(AppEvent.inventoryAdjusted);
+        AppEventBus.instance.fire(AppEvent.batchChanged);
+        AppEventBus.instance.fire(AppEvent.supplierUpdated);
         return null;
       },
       onFailure: (f) => f.message,
@@ -110,5 +136,11 @@ class PurchaseController extends ChangeNotifier {
       onSuccess: (d) => d,
       onFailure: (_) => {},
     );
+  }
+
+  @override
+  void dispose() {
+    _eventSubscription?.cancel();
+    super.dispose();
   }
 }

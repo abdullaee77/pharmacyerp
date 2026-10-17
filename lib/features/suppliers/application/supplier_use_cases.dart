@@ -65,6 +65,7 @@ class RecordSupplierPaymentUseCase {
     required SupplierId supplierId,
     required Money amount,
     required String paymentMethod,
+    String? accountId,
     String? reference,
     String? note,
     required String operatorName,
@@ -86,6 +87,7 @@ class RecordSupplierPaymentUseCase {
       debit: amount,
       credit: Money.zero(),
       paymentMethod: paymentMethod,
+      accountId: accountId,
       operatorName: operatorName,
       createdAt: DateTime.now(),
     );

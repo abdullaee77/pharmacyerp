@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:pharmacy/core/data/database_helper.dart';
+import 'package:pharmacy/core/services/app_event_bus.dart';
 import '../../../inventory/domain/batch.dart';
 import '../../domain/medicine.dart';
 import '../../domain/medicine_repository.dart';
@@ -9,11 +11,21 @@ class MedicineController extends ChangeNotifier {
   final MedicineRepository _repository;
   final DatabaseHelper _dbHelper;
 
+  StreamSubscription<AppEvent>? _eventSubscription;
+
   MedicineController({
     required MedicineRepository repository,
     DatabaseHelper? dbHelper,
   })  : _repository = repository,
-        _dbHelper = dbHelper ?? DatabaseHelper.instance;
+        _dbHelper = dbHelper ?? DatabaseHelper.instance {
+    _eventSubscription = AppEventBus.instance.stream.listen((event) {
+      if (event == AppEvent.medicineUpdated ||
+          event == AppEvent.purchaseCompleted ||
+          event == AppEvent.inventoryAdjusted) {
+        loadMedicines(silent: true);
+      }
+    });
+  }
 
   List<Medicine> _medicines = [];
   List<String> _categories = [];
@@ -70,7 +82,6 @@ class MedicineController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Bulk create medicines from import. Returns summary string.
   Future<String> bulkCreateMedicines(List<Medicine> medicinesList) async {
     var ok = 0;
     var fail = 0;
@@ -89,6 +100,7 @@ class MedicineController extends ChangeNotifier {
 
     await loadMedicines();
     await loadFilterOptions();
+    AppEventBus.instance.fire(AppEvent.medicineUpdated);
 
     if (fail == 0) {
       return 'Imported $ok medicines successfully.';
@@ -96,10 +108,7 @@ class MedicineController extends ChangeNotifier {
     return 'Imported $ok, failed $fail.\n${errors.take(3).join("\n")}';
   }
 
-  /// Creates a medicine and optionally initializes opening stock.
-  /// Returns null on success, or an error message on failure.
   Future<String?> createMedicineWithStock(MedicineCreationResult result) async {
-    // 1. Save medicine master record
     final medResult = await _repository.createMedicine(result.medicine);
     final errorMsg = medResult.fold(
       onSuccess: (_) => null,
@@ -107,7 +116,6 @@ class MedicineController extends ChangeNotifier {
     );
     if (errorMsg != null) return errorMsg;
 
-    // 2. If opening stock info was provided, create batch + inventory stock
     final stock = result.openingStock;
     if (stock != null) {
       try {
@@ -116,7 +124,6 @@ class MedicineController extends ChangeNotifier {
         final now = DateTime.now().toIso8601String();
 
         await db.transaction((txn) async {
-          // Create batch record
           final batchId = BatchId.generate();
           await txn.insert('batches', {
             'id': batchId.value,
@@ -130,7 +137,6 @@ class MedicineController extends ChangeNotifier {
             'updated_at': now,
           });
 
-          // Create / update inventory stock
           final existing = await txn.query(
             'inventory_stocks',
             where: 'medicine_id = ?',
@@ -151,7 +157,6 @@ class MedicineController extends ChangeNotifier {
             });
           }
 
-          // Write movement log
           await txn.insert('inventory_movements', {
             'id': 'mov_${DateTime.now().microsecondsSinceEpoch}',
             'medicine_id': medId,
@@ -170,10 +175,14 @@ class MedicineController extends ChangeNotifier {
     }
 
     await loadMedicines();
+    AppEventBus.instance.fire(AppEvent.medicineUpdated);
+    if (stock != null) {
+      AppEventBus.instance.fire(AppEvent.inventoryAdjusted);
+      AppEventBus.instance.fire(AppEvent.batchChanged);
+    }
     return null;
   }
 
-  /// Legacy method — still works for edits without stock.
   Future<String?> createMedicine(Medicine medicine) async {
     final result = await _repository.createMedicine(medicine);
     final errorMsg = result.fold(
@@ -182,6 +191,7 @@ class MedicineController extends ChangeNotifier {
     );
     if (errorMsg != null) return errorMsg;
     await loadMedicines();
+    AppEventBus.instance.fire(AppEvent.medicineUpdated);
     return null;
   }
 
@@ -193,6 +203,7 @@ class MedicineController extends ChangeNotifier {
     );
     if (errorMsg != null) return errorMsg;
     await loadMedicines();
+    AppEventBus.instance.fire(AppEvent.medicineUpdated);
     return null;
   }
 
@@ -204,6 +215,13 @@ class MedicineController extends ChangeNotifier {
     );
     if (errorMsg != null) return errorMsg;
     await loadMedicines();
+    AppEventBus.instance.fire(AppEvent.medicineUpdated);
     return null;
+  }
+
+  @override
+  void dispose() {
+    _eventSubscription?.cancel();
+    super.dispose();
   }
 }

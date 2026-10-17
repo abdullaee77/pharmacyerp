@@ -58,7 +58,16 @@ class SalesController extends ChangeNotifier {
     return result.fold(
       onSuccess: (_) {
         loadHistory();
+        // Broadcast all affected areas so UI updates everywhere instantly
         AppEventBus.instance.fire(AppEvent.saleCompleted);
+        AppEventBus.instance.fire(AppEvent.inventoryAdjusted);
+        AppEventBus.instance.fire(AppEvent.batchChanged);
+        if (accountId != null && accountAmountPaisa > 0) {
+          AppEventBus.instance.fire(AppEvent.accountChanged);
+        }
+        if (customerPhone != null && customerPhone.isNotEmpty) {
+          AppEventBus.instance.fire(AppEvent.customerUpdated);
+        }
         return null;
       },
       onFailure: (f) => f.message,
@@ -107,7 +116,10 @@ class SalesController extends ChangeNotifier {
     return result.fold(
       onSuccess: (_) {
         loadHistory();
-        AppEventBus.instance.fire(AppEvent.saleCompleted);
+        AppEventBus.instance.fire(AppEvent.saleReturned);
+        AppEventBus.instance.fire(AppEvent.inventoryAdjusted);
+        AppEventBus.instance.fire(AppEvent.batchChanged);
+        AppEventBus.instance.fire(AppEvent.customerUpdated);
         return null;
       },
       onFailure: (f) => f.message,

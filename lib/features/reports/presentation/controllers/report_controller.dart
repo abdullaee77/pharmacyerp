@@ -14,10 +14,23 @@ class ReportController extends ChangeNotifier {
       : _generateReport = GenerateReportUseCase(repository),
         _getMetrics = GetBusinessMetricsUseCase(repository) {
     _eventSubscription = AppEventBus.instance.stream.listen((event) {
+      // Refresh dashboard metrics on ANY financial or inventory change
       if (event == AppEvent.saleCompleted ||
+          event == AppEvent.saleReturned ||
           event == AppEvent.purchaseCompleted ||
-          event == AppEvent.expenseAdded) {
+          event == AppEvent.purchaseReturned ||
+          event == AppEvent.expenseAdded ||
+          event == AppEvent.supplierPaymentRecorded ||
+          event == AppEvent.customerPaymentRecorded ||
+          event == AppEvent.accountChanged ||
+          event == AppEvent.inventoryAdjusted ||
+          event == AppEvent.batchChanged ||
+          event == AppEvent.medicineUpdated) {
         loadMetrics(silent: true);
+        // Also refresh the currently-open report if any
+        if (_currentReport != null) {
+          generateReport(silent: true);
+        }
       }
     });
   }

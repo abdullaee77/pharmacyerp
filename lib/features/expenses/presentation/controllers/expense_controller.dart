@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:pharmacy/core/services/app_event_bus.dart';
 import '../../../accounts/domain/account_repository.dart';
 import '../../application/expense_use_cases.dart';
 import '../../domain/expense.dart';
@@ -11,17 +13,25 @@ class ExpenseController extends ChangeNotifier {
   final CreateExpenseUseCase _createExpense;
   final DeleteExpenseUseCase _deleteExpense;
 
+  StreamSubscription<AppEvent>? _eventSubscription;
+
   ExpenseController({
     required ExpenseRepository expenseRepository,
     AccountRepository? accountRepository,
-  }) : _getExpenses = GetExpensesUseCase(expenseRepository),
+  })  : _getExpenses = GetExpensesUseCase(expenseRepository),
         _getSummary = GetExpenseSummaryUseCase(expenseRepository),
         _getCategories = GetExpenseCategoriesUseCase(expenseRepository),
         _createExpense = CreateExpenseUseCase(
           expenseRepository: expenseRepository,
           accountRepository: accountRepository,
         ),
-        _deleteExpense = DeleteExpenseUseCase(expenseRepository);
+        _deleteExpense = DeleteExpenseUseCase(expenseRepository) {
+    _eventSubscription = AppEventBus.instance.stream.listen((event) {
+      if (event == AppEvent.expenseAdded) {
+        loadAll(silent: true);
+      }
+    });
+  }
 
   List<Expense> _expenses = [];
   List<ExpenseCategory> _categories = [];
@@ -84,6 +94,8 @@ class ExpenseController extends ChangeNotifier {
     return r.fold(
       onSuccess: (_) {
         loadAll();
+        AppEventBus.instance.fire(AppEvent.expenseAdded);
+        AppEventBus.instance.fire(AppEvent.accountChanged);
         return null;
       },
       onFailure: (f) => f.message,
@@ -95,9 +107,17 @@ class ExpenseController extends ChangeNotifier {
     return r.fold(
       onSuccess: (_) {
         loadAll();
+        AppEventBus.instance.fire(AppEvent.expenseAdded);
+        AppEventBus.instance.fire(AppEvent.accountChanged);
         return null;
       },
       onFailure: (f) => f.message,
     );
+  }
+
+  @override
+  void dispose() {
+    _eventSubscription?.cancel();
+    super.dispose();
   }
 }

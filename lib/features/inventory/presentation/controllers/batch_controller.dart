@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:pharmacy/core/services/app_event_bus.dart';
 import '../../../medicines/domain/medicine.dart';
 import '../../domain/batch.dart';
 import '../../domain/batch_repository.dart';
@@ -10,11 +12,25 @@ class BatchController extends ChangeNotifier {
   final UpdateBatchUseCase _updateBatch;
   final DeleteBatchUseCase _deleteBatch;
 
+  StreamSubscription<AppEvent>? _eventSubscription;
+
   BatchController({required BatchRepository repository})
       : _getBatches = GetBatchesUseCase(repository),
         _createBatch = CreateBatchUseCase(repository),
         _updateBatch = UpdateBatchUseCase(repository),
-        _deleteBatch = DeleteBatchUseCase(repository);
+        _deleteBatch = DeleteBatchUseCase(repository) {
+    _eventSubscription = AppEventBus.instance.stream.listen((event) {
+      if (event == AppEvent.saleCompleted ||
+          event == AppEvent.saleReturned ||
+          event == AppEvent.purchaseCompleted ||
+          event == AppEvent.purchaseReturned ||
+          event == AppEvent.inventoryAdjusted ||
+          event == AppEvent.batchChanged ||
+          event == AppEvent.medicineUpdated) {
+        loadBatches(silent: true);
+      }
+    });
+  }
 
   List<Batch> _batches = [];
   bool _isLoading = false;
@@ -69,6 +85,8 @@ class BatchController extends ChangeNotifier {
     return result.fold(
       onSuccess: (_) {
         loadBatches();
+        AppEventBus.instance.fire(AppEvent.batchChanged);
+        AppEventBus.instance.fire(AppEvent.inventoryAdjusted);
         return null;
       },
       onFailure: (f) => f.message,
@@ -80,6 +98,7 @@ class BatchController extends ChangeNotifier {
     return result.fold(
       onSuccess: (_) {
         loadBatches();
+        AppEventBus.instance.fire(AppEvent.batchChanged);
         return null;
       },
       onFailure: (f) => f.message,
@@ -91,9 +110,17 @@ class BatchController extends ChangeNotifier {
     return result.fold(
       onSuccess: (_) {
         loadBatches();
+        AppEventBus.instance.fire(AppEvent.batchChanged);
+        AppEventBus.instance.fire(AppEvent.inventoryAdjusted);
         return null;
       },
       onFailure: (f) => f.message,
     );
+  }
+
+  @override
+  void dispose() {
+    _eventSubscription?.cancel();
+    super.dispose();
   }
 }

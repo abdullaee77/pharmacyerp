@@ -32,6 +32,7 @@ class SupplierLedgerEntry extends ValueObject {
   final Money debit;
   final Money credit;
   final String? paymentMethod;
+  final String? accountId;
   final String operatorName;
   final DateTime createdAt;
 
@@ -44,6 +45,7 @@ class SupplierLedgerEntry extends ValueObject {
     required this.debit,
     required this.credit,
     this.paymentMethod,
+    this.accountId,
     required this.operatorName,
     required this.createdAt,
   });

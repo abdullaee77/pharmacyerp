@@ -4,6 +4,7 @@ import '../../../core/data/purchase_transaction.dart';
 import '../../../core/data/return_transactions.dart';
 import '../../../core/error/failures.dart';
 import '../../../core/result/result.dart';
+import '../../accounts/domain/financial_transaction.dart';
 import '../../medicines/domain/medicine.dart';
 import '../../medicines/domain/value_objects.dart';
 import '../domain/purchase.dart';
@@ -29,7 +30,6 @@ class SqlitePurchaseRepository implements PurchaseRepository {
     try {
       final db = await _db;
 
-      // Pack exact payload structure matching PurchaseTransaction expectation with MRP
       final payload = {
         'purchase': {
           'id': p.id.value,
@@ -48,40 +48,46 @@ class SqlitePurchaseRepository implements PurchaseRepository {
           'medicine_name': item.medicineName,
           'batch_number': item.batchNumber,
           'expiry_date': item.expiryDate.toIso8601String(),
-          'quantity': item.quantity, // Static bought quantity saved to purchase_items
+          'quantity': item.quantity,
           'purchase_price': item.purchasePrice.paisa,
           'mrp': item.mrp.paisa,
           'selling_price': item.sellingPrice.paisa,
           'line_total': item.lineTotal.paisa,
         }).toList(),
         'operatorName': 'System standalone/server',
+        'accountId': accountId,
+        'amountPaidPaisa': amountPaidPaisa,
       };
 
-      // 1. Core inventory and batch logic via transaction
-      await PurchaseTransaction.run(db, payload);
+      await db.transaction((txn) async {
+        // 1. Core inventory, batches, stock, supplier ledger
+        await PurchaseTransaction.run(txn, payload);
 
-      // 2. Ledger: money OUT (credit) for the payment to the supplier
-      if (accountId != null && accountId.isNotEmpty && amountPaidPaisa > 0) {
-        await db.insert('financial_transactions', {
-          'id': 'ft_pur_${p.id.value}',
-          'account_id': accountId,
-          'source': 'purchase',
-          'description': 'Purchase ${p.invoiceNumber.value} — ${p.supplierName}',
-          'reference': p.id.value,
-          'debit': 0,
-          'credit': amountPaidPaisa, // money out
-          'operator_name': 'System standalone/server',
-          'created_at': p.createdAt.toIso8601String(),
-        });
-      }
+        // 2. Debit the payment account (money OUT = credit)
+        if (accountId != null && accountId.isNotEmpty && amountPaidPaisa > 0) {
+          await txn.insert('financial_transactions', {
+            'id': 'ft_pur_${p.id.value}_${DateTime.now().microsecondsSinceEpoch}',
+            'account_id': accountId,
+            'source': TransactionSource.purchase.name,
+            'description':
+            'Purchase ${p.invoiceNumber.value} — ${p.supplierName}',
+            'reference': p.id.value,
+            'debit': 0,
+            'credit': amountPaidPaisa,
+            'operator_name': 'System standalone/server',
+            'created_at': p.createdAt.toIso8601String(),
+          });
+        }
+      });
 
       return Success(p);
     } catch (e) {
-      return Failure(DatabaseFailure(message: 'Atomic Purchase Transaction failed: $e'));
+      return Failure(
+          DatabaseFailure(message: 'Atomic Purchase Transaction failed: $e'));
     }
   }
 
-  // ─── READ PURCHASES (ALWAYS LOADS IMMUTABLE BOUGHT QUANTITY) ───
+  // ─── READ PURCHASES ──────────────────────────────────────────
 
   @override
   Future<Result<List<Purchase>>> getPurchases({String? searchQuery}) async {
@@ -147,7 +153,7 @@ class SqlitePurchaseRepository implements PurchaseRepository {
       medicineName: r['medicine_name'] as String,
       batchNumber: r['batch_number'] as String,
       expiryDate: DateTime.parse(r['expiry_date'] as String),
-      quantity: r['quantity'] as int, // IMMUTABLE INVOICE BOUGHT QUANTITY
+      quantity: r['quantity'] as int,
       purchasePrice: Money.fromPaisa(r['purchase_price'] as int),
       mrp: Money.fromPaisa(
         (r['mrp'] as int?) ??
@@ -174,7 +180,7 @@ class SqlitePurchaseRepository implements PurchaseRepository {
     );
   }
 
-  // ─── ATOMIC PURCHASE RETURNS ────────────────────────────────────────
+  // ─── PURCHASE RETURNS ────────────────────────────────────────
 
   @override
   Future<Result<PurchaseReturn>> createPurchaseReturn(PurchaseReturn r) async {

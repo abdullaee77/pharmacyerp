@@ -20,7 +20,11 @@ class InventoryController extends ChangeNotifier {
         _getMovements = GetMovementsUseCase(repository) {
     _eventSubscription = AppEventBus.instance.stream.listen((event) {
       if (event == AppEvent.saleCompleted ||
+          event == AppEvent.saleReturned ||
           event == AppEvent.purchaseCompleted ||
+          event == AppEvent.purchaseReturned ||
+          event == AppEvent.inventoryAdjusted ||
+          event == AppEvent.batchChanged ||
           event == AppEvent.medicineUpdated) {
         loadStockLevels(silent: true);
         if (_activeMedicineId != null) {
@@ -88,7 +92,7 @@ class InventoryController extends ChangeNotifier {
     required AdjustmentReason reason,
     String? reference,
     required String operatorName,
-    String? batchId, // ← Added
+    String? batchId,
   }) async {
     final result = await _adjustStock.execute(
       medicineId: medicineId,
@@ -96,12 +100,13 @@ class InventoryController extends ChangeNotifier {
       reason: reason,
       reference: reference,
       operatorName: operatorName,
-      batchId: batchId, // ← Passed to usecase
+      batchId: batchId,
     );
 
     return result.fold(
       onSuccess: (_) {
-        AppEventBus.instance.fire(AppEvent.medicineUpdated);
+        AppEventBus.instance.fire(AppEvent.inventoryAdjusted);
+        AppEventBus.instance.fire(AppEvent.batchChanged);
         return null;
       },
       onFailure: (f) => f.message,

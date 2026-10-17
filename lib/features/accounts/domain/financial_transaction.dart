@@ -7,6 +7,10 @@ import 'account.dart';
 enum TransactionSource {
   manual(label: 'Manual Entry'),
   expense(label: 'Expense'),
+  purchase(label: 'Purchase'),       // ✅ ADDED
+  sale(label: 'Sale'),               // ✅ ADDED
+  purchaseReturn(label: 'Purchase Return'),  // ✅ ADDED
+  saleReturn(label: 'Sale Return'),          // ✅ ADDED
   openingBalance(label: 'Opening Balance'),
   transfer(label: 'Transfer'),
   adjustment(label: 'Adjustment');

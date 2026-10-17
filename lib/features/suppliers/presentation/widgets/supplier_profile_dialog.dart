@@ -5,6 +5,7 @@ import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
 import '../../../../core/widgets/permission_gate.dart';
+import '../../../accounts/domain/account.dart';
 import '../../../authentication/domain/user.dart';
 import '../../../users/domain/role.dart';
 import '../../domain/supplier.dart';
@@ -18,6 +19,7 @@ class SupplierProfileDialog extends StatefulWidget {
   final String operatorName;
   final User? user;
   final VoidCallback? onEdit;
+  final List<AccountWithBalance> accounts;
 
   const SupplierProfileDialog({
     super.key,
@@ -26,6 +28,7 @@ class SupplierProfileDialog extends StatefulWidget {
     required this.operatorName,
     this.user,
     this.onEdit,
+    this.accounts = const [],
   });
 
   @override
@@ -41,7 +44,6 @@ class _SupplierProfileDialogState extends State<SupplierProfileDialog> {
     });
   }
 
-  // Pay Supplier is a supplier-ledger write. Treat it as suppliers.add.
   bool get _canPay => PermissionGate.allow(
       widget.user, PermissionCategory.suppliers, PermissionAction.add);
 
@@ -58,6 +60,7 @@ class _SupplierProfileDialogState extends State<SupplierProfileDialog> {
         supplier: latest.supplier,
         currentPayable: latest.payable,
         operatorName: widget.operatorName,
+        accounts: widget.accounts,
       ),
     );
 

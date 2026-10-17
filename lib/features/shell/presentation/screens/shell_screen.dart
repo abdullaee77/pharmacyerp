@@ -41,7 +41,7 @@ import '../../../inventory/presentation/controllers/batch_controller.dart';
 import '../../../inventory/presentation/screens/inventory_dashboard_screen.dart';
 import '../../../inventory/presentation/screens/inventory_list_screen.dart';
 import '../../../inventory/presentation/screens/batch_list_screen.dart';
-import '../../../licensing/data/mock_license_repository.dart';
+import '../../../licensing/data/sqlite_license_repository.dart';
 import '../../../licensing/presentation/controllers/license_controller.dart';
 import '../../../licensing/presentation/screens/license_screen.dart';
 import '../../../medicines/data/sqlite_medicine_repository.dart';
@@ -197,7 +197,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     _userController = UserController(repository: userRepo);
     _settingsController = SettingsController(repository: settingsRepo);
     _settingsController.loadSettings();
-    _licenseController = LicenseController(repository: MockLicenseRepository());
+    _licenseController = LicenseController(repository: SqliteLicenseRepository());
     _backupController = BackupController();
     _backupController.onDataRestored = _reloadAllData;
     _networkController = NetworkController(settingsRepo: settingsRepo);
@@ -274,9 +274,13 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
       ),
       _gatedPage(
         NavigationItem.suppliers,
-            () => SupplierListScreen(
-          controller: _supplierController,
-          authController: widget.authController,
+            () => ListenableBuilder(
+          listenable: _accountController,
+          builder: (context, _) => SupplierListScreen(
+            controller: _supplierController,
+            authController: widget.authController,
+            accounts: _accountController.accounts,
+          ),
         ),
       ),
       _gatedPage(
