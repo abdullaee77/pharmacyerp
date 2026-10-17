@@ -10,6 +10,8 @@ abstract class SalesRepository {
   Future<Result<Sale>> createSale({
     required Sale sale,
     required List<PaymentTender> tenders,
+    String? accountId,
+    int accountAmountPaisa = 0,
   });
 
   Future<Result<List<Sale>>> getSales({

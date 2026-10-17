@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../inventory/domain/batch.dart';
 import '../../../medicines/domain/medicine.dart';
+import '../../../medicines/domain/value_objects.dart';
 import '../../application/pos_use_cases.dart';
 import '../../domain/cart_item.dart';
 import '../../domain/pos_models.dart';
@@ -111,15 +112,115 @@ class PosCartController extends ChangeNotifier {
     );
   }
 
-  bool addToCart({required Medicine medicine, required Batch batch, int quantity = 1}) {
+  /// Automated FEFO Multi-Batch Auto Allocator
+  /// Sorts batches by expiry date ASC (via daysRemaining), uses earliest expiring stock first,
+  /// and splits requested quantity across batches with batch-specific pricing.
+  bool addMedicineWithFefo({
+    required Medicine medicine,
+    required List<Batch> batches,
+    required int requestedQuantity,
+  }) {
+    if (requestedQuantity <= 0) return false;
+
+    // 1. Filter out expired and zero-stock batches, then sort by FEFO (earliest expiring first)
+    final activeBatches = batches.where((b) {
+      final isExpired = b.status == BatchStatus.expired || b.expiryDate.daysRemaining < 0;
+      return !isExpired && b.quantity.value > 0;
+    }).toList()
+      ..sort((a, b) => a.expiryDate.daysRemaining.compareTo(b.expiryDate.daysRemaining));
+
+    if (activeBatches.isEmpty) {
+      _setMessage('No active non-expired stock available for ${medicine.name}.', isError: true);
+      return false;
+    }
+
+    // 2. Calculate remaining available stock across batches considering items ALREADY in cart
+    int totalAvailableInCart = 0;
+    for (final b in activeBatches) {
+      final existingIdx = _items.indexWhere((i) => i.batch.id == b.id);
+      final inCart = existingIdx >= 0 ? _items[existingIdx].quantity : 0;
+      totalAvailableInCart += (b.quantity.value - inCart);
+    }
+
+    if (totalAvailableInCart < requestedQuantity) {
+      _setMessage(
+        'Cannot add $requestedQuantity units. Only $totalAvailableInCart units available for ${medicine.name}.',
+        isError: true,
+      );
+      return false;
+    }
+
+    // 3. Sequential FEFO Allocation Loop
+    int remainingNeeded = requestedQuantity;
+
+    for (final b in activeBatches) {
+      final existingIdx = _items.indexWhere((i) => i.batch.id == b.id);
+      final currentQtyInCart = existingIdx >= 0 ? _items[existingIdx].quantity : 0;
+      final availInBatch = b.quantity.value - currentQtyInCart;
+
+      if (availInBatch <= 0) continue;
+
+      final toTake = remainingNeeded < availInBatch ? remainingNeeded : availInBatch;
+      final priceToUse = b.sellingPrice.paisa > 0 ? b.sellingPrice : medicine.sellingPrice;
+      final newQty = currentQtyInCart + toTake;
+
+      if (existingIdx >= 0) {
+        _items[existingIdx] = _items[existingIdx].copyWith(
+          quantity: newQty,
+          unitPrice: priceToUse,
+        );
+        _selectedLine = _items[existingIdx];
+      } else {
+        final line = CartItem(
+          id: CartItemId.generate(),
+          medicine: medicine,
+          batch: b,
+          quantity: toTake,
+          unitPrice: priceToUse,
+        );
+        _items.add(line);
+        _selectedLine = line;
+      }
+
+      remainingNeeded -= toTake;
+      if (remainingNeeded <= 0) break;
+    }
+
+    _lastMessage = null;
+    notifyListeners();
+    return true;
+  }
+
+  bool addToCart({
+    required Medicine medicine,
+    required Batch batch,
+    int quantity = 1,
+  }) {
+    final priceToUse = batch.sellingPrice.paisa > 0
+        ? batch.sellingPrice
+        : medicine.sellingPrice;
+
     final existingIdx = _items.indexWhere(
           (i) => i.medicine.id == medicine.id && i.batch.id == batch.id,
     );
 
+    final currentQtyInCart = existingIdx >= 0 ? _items[existingIdx].quantity : 0;
+    final totalRequested = currentQtyInCart + quantity;
+
+    if (totalRequested > batch.quantity.value) {
+      _setMessage(
+        'Cannot add. Only ${batch.quantity.value} units available in Batch ${batch.batchNumber.value}.',
+        isError: true,
+      );
+      return false;
+    }
+
     if (existingIdx >= 0) {
       final existing = _items[existingIdx];
-      final newQty = existing.quantity + quantity;
-      _items[existingIdx] = existing.copyWith(quantity: newQty);
+      _items[existingIdx] = existing.copyWith(
+        quantity: totalRequested,
+        unitPrice: priceToUse,
+      );
       _selectedLine = _items[existingIdx];
     } else {
       final line = CartItem(
@@ -127,7 +228,7 @@ class PosCartController extends ChangeNotifier {
         medicine: medicine,
         batch: batch,
         quantity: quantity,
-        unitPrice: medicine.sellingPrice,
+        unitPrice: priceToUse,
       );
       _items.add(line);
       _selectedLine = line;
@@ -141,6 +242,20 @@ class PosCartController extends ChangeNotifier {
     final idx = _items.indexWhere((i) => i.id == id);
     if (idx < 0) return false;
     final line = _items[idx];
+
+    if (newQuantity <= 0) {
+      removeLine(id);
+      return true;
+    }
+
+    if (newQuantity > line.batch.quantity.value) {
+      _setMessage(
+        'Cannot exceed available stock in Batch ${line.batch.batchNumber.value} (${line.batch.quantity.value} units).',
+        isError: true,
+      );
+      return false;
+    }
+
     _items[idx] = line.copyWith(quantity: newQuantity);
     if (_selectedLine?.id == id) _selectedLine = _items[idx];
     notifyListeners();
@@ -161,7 +276,23 @@ class PosCartController extends ChangeNotifier {
     final idx = _items.indexWhere((i) => i.id == id);
     if (idx < 0) return false;
     final line = _items[idx];
-    _items[idx] = line.copyWith(batch: newBatch);
+
+    final priceToUse = newBatch.sellingPrice.paisa > 0
+        ? newBatch.sellingPrice
+        : line.medicine.sellingPrice;
+
+    if (line.quantity > newBatch.quantity.value) {
+      _setMessage(
+        'Selected Batch ${newBatch.batchNumber.value} only has ${newBatch.quantity.value} units available.',
+        isError: true,
+      );
+      return false;
+    }
+
+    _items[idx] = line.copyWith(
+      batch: newBatch,
+      unitPrice: priceToUse,
+    );
     if (_selectedLine?.id == id) _selectedLine = _items[idx];
     notifyListeners();
     return true;
@@ -188,7 +319,6 @@ class PosCartController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Hold & Resume Cart Methods ──
   bool holdCurrentSale({String? note}) {
     if (_items.isEmpty) return false;
 

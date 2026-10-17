@@ -49,6 +49,7 @@ class _AccountLedgerDialogState extends State<AccountLedgerDialog> {
         final ledger = widget.controller.activeLedger;
 
         return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 820, maxHeight: 640),
             child: Column(
@@ -115,7 +116,7 @@ class _AccountLedgerDialogState extends State<AccountLedgerDialog> {
       return const AppEmptyState(
         icon: Icons.receipt_long_outlined,
         title: 'No transactions yet',
-        subtitle: 'Transactions will appear here as expenses and manual entries are recorded.',
+        subtitle: 'Transactions will appear here as entries are recorded.',
       );
     }
 
@@ -151,25 +152,22 @@ class _AccountLedgerDialogState extends State<AccountLedgerDialog> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(tx.description, style: AppTypography.tableCell),
-                    Text(tx.source.label,
-                        style: AppTypography.caption
-                            .copyWith(color: AppColors.textMuted)),
+                    Text(
+                      tx.source.label,
+                      style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+                    ),
                   ],
                 )),
                 DataCell(Text(
                   tx.debit.paisa == 0 ? '—' : tx.debit.display,
                   style: AppTypography.numericSmall.copyWith(
-                    color: tx.debit.paisa > 0
-                        ? AppColors.success
-                        : AppColors.textMuted,
+                    color: tx.debit.paisa > 0 ? AppColors.success : AppColors.textMuted,
                   ),
                 )),
                 DataCell(Text(
                   tx.credit.paisa == 0 ? '—' : tx.credit.display,
                   style: AppTypography.numericSmall.copyWith(
-                    color: tx.credit.paisa > 0
-                        ? AppColors.error
-                        : AppColors.textMuted,
+                    color: tx.credit.paisa > 0 ? AppColors.error : AppColors.textMuted,
                   ),
                 )),
                 DataCell(Text(

@@ -1,5 +1,3 @@
-// lib/features/sales/presentation/screens/pos_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -8,14 +6,14 @@ import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
 import '../../../../core/widgets/permission_gate.dart';
+import '../../../accounts/presentation/controllers/account_controller.dart'; // REQUIRED
 import '../../../authentication/presentation/controllers/auth_controller.dart';
 import '../../../inventory/domain/batch.dart';
-import '../../../medicines/domain/value_objects.dart';
+import '../../../medicines/domain/medicine.dart';
 import '../../../users/domain/role.dart';
 import '../controllers/pos_cart_controller.dart';
 import '../controllers/sales_controller.dart';
 import 'package:pharmacy/features/sales/domain/pos_models.dart';
-import '../widgets/batch_picker_dialog.dart';
 import '../widgets/invoice_dialog.dart';
 import '../widgets/payment_dialog.dart';
 import '../widgets/pos_cart_table.dart';
@@ -25,12 +23,14 @@ class PosScreen extends StatefulWidget {
   final PosCartController controller;
   final SalesController salesController;
   final AuthController authController;
+  final AccountController? accountController; // Added AccountController
 
   const PosScreen({
     super.key,
     required this.controller,
     required this.salesController,
     required this.authController,
+    this.accountController,
   });
 
   @override
@@ -51,6 +51,7 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.controller.loadInitial();
+      widget.accountController?.loadAccounts(); // Load accounts for checkout
     });
   }
 
@@ -78,7 +79,6 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
   bool _processKey(LogicalKeyboardKey logical, PhysicalKeyboardKey physical) {
     final String label = logical.keyLabel.trim().toUpperCase();
 
-    // 1. Search Medicine: F2
     if (logical == LogicalKeyboardKey.f2 ||
         physical == PhysicalKeyboardKey.f2 ||
         label == 'F2') {
@@ -86,7 +86,6 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
       return true;
     }
 
-    // 2. Complete Sale / Pay: F8
     if (logical == LogicalKeyboardKey.f8 ||
         physical == PhysicalKeyboardKey.f8 ||
         label == 'F8') {
@@ -96,7 +95,6 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
       return true;
     }
 
-    // 3. Hold / Resume Sale: F9
     if (logical == LogicalKeyboardKey.f9 ||
         physical == PhysicalKeyboardKey.f9 ||
         label == 'F9') {
@@ -106,7 +104,6 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
       return true;
     }
 
-    // 4. Escape: Clear Search Focus
     if (logical == LogicalKeyboardKey.escape ||
         physical == PhysicalKeyboardKey.escape) {
       if (_searchFocusNode.hasFocus) {
@@ -150,42 +147,56 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
       final batches = await widget.controller.loadBatches(medicine.id);
       if (!mounted) return;
 
-      Batch targetBatch;
-
-      final usableBatches = batches
-          .where((b) => b.status != BatchStatus.expired)
-          .toList();
+      final usableBatches = batches.where((b) {
+        final isExpired = b.status == BatchStatus.expired || b.expiryDate.daysRemaining < 0;
+        return !isExpired && b.quantity.value > 0;
+      }).toList();
 
       if (usableBatches.isEmpty) {
-        targetBatch = Batch(
-          id: BatchId.generate(),
-          medicineId: medicine.id,
-          medicineName: medicine.name,
-          batchNumber: BatchNumber.unsafe('BATCH-01'),
-          expiryDate: ExpiryDate(DateTime.now().add(const Duration(days: 365))),
-          quantity: Quantity.create(result.currentStock > 0 ? result.currentStock : 1000),
-          purchasePrice: medicine.purchasePrice,
-          sellingPrice: medicine.sellingPrice,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
+        AppToast.error(
+          context,
+          'No active physical stock available for ${medicine.name}. Receive a purchase invoice first.',
         );
-      } else if (usableBatches.length == 1) {
-        targetBatch = usableBatches.first;
-      } else {
-        final Batch? selected = await showDialog<Batch?>(
-          context: context,
-          builder: (ctx) => BatchPickerDialog(medicine: medicine, batches: usableBatches),
-        );
-
-        if (selected == null) return;
-        targetBatch = selected;
+        return;
       }
 
-      widget.controller.addToCart(
-        medicine: medicine,
-        batch: targetBatch,
-        quantity: 1,
+      int totalAvail = 0;
+      for (final b in usableBatches) {
+        final inCart = widget.controller.items
+            .where((i) => i.batch.id == b.id)
+            .fold<int>(0, (sum, item) => sum + item.quantity);
+        totalAvail += (b.quantity.value - inCart);
+      }
+
+      if (totalAvail <= 0) {
+        AppToast.error(
+          context,
+          'All available stock for ${medicine.name} is already in the cart.',
+        );
+        return;
+      }
+
+      final int? quantity = await showDialog<int>(
+        context: context,
+        builder: (ctx) => _QuantityPromptDialog(
+          medicine: medicine,
+          totalAvailable: totalAvail,
+          batchCount: usableBatches.length,
+        ),
       );
+
+      if (quantity == null || quantity <= 0) return;
+
+      final ok = widget.controller.addMedicineWithFefo(
+        medicine: medicine,
+        batches: usableBatches,
+        requestedQuantity: quantity,
+      );
+
+      if (ok && mounted) {
+        _searchTextController.clear();
+        focusSearch();
+      }
     } catch (e, stack) {
       debugPrint('Error adding medicine to cart: $e\n$stack');
       if (mounted) {
@@ -196,6 +207,10 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
 
   Future<void> _onPay() async {
     try {
+      // Refresh accounts list before opening dialog
+      await widget.accountController?.loadAccounts(silent: true);
+      final accounts = widget.accountController?.accounts ?? const [];
+
       final result = await showDialog<PaymentResult>(
         context: context,
         barrierDismissible: false,
@@ -204,10 +219,14 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
           salesController: widget.salesController,
           operatorName: widget.authController.currentUser?.fullName ?? 'Operator',
           user: widget.authController.currentUser,
+          accounts: accounts, // PASS ACCOUNTS HERE
         ),
       );
 
       if (result != null && mounted) {
+        // Refresh account balances
+        widget.accountController?.loadAccounts();
+
         await showDialog(
           context: context,
           builder: (ctx) => InvoiceDialog(
@@ -444,6 +463,170 @@ class PosScreenState extends State<PosScreen> with AutomaticKeepAliveClientMixin
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _QuantityPromptDialog extends StatefulWidget {
+  final Medicine medicine;
+  final int totalAvailable;
+  final int batchCount;
+
+  const _QuantityPromptDialog({
+    required this.medicine,
+    required this.totalAvailable,
+    required this.batchCount,
+  });
+
+  @override
+  State<_QuantityPromptDialog> createState() => _QuantityPromptDialogState();
+}
+
+class _QuantityPromptDialogState extends State<_QuantityPromptDialog> {
+  final _qtyCtrl = TextEditingController(text: '1');
+  final _focusNode = FocusNode();
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+      _qtyCtrl.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _qtyCtrl.text.length,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final val = int.tryParse(_qtyCtrl.text.trim());
+    if (val == null || val <= 0) {
+      setState(() => _error = 'Please enter a valid quantity.');
+      return;
+    }
+    if (val > widget.totalAvailable) {
+      setState(() => _error = 'Cannot exceed total stock of ${widget.totalAvailable}.');
+      return;
+    }
+    Navigator.of(context).pop(val);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+      child: Container(
+        width: 420,
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                  child: const Icon(Icons.add_shopping_cart_rounded, color: AppColors.primary, size: 24),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.medicine.name,
+                        style: AppTypography.subtitle.copyWith(fontWeight: FontWeight.bold),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'Stock: ${widget.totalAvailable} units across ${widget.batchCount} FEFO batch(es)',
+                        style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Text('Enter Quantity', style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: AppSpacing.xs),
+            TextField(
+              controller: _qtyCtrl,
+              focusNode: _focusNode,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: AppTypography.numeric.copyWith(fontSize: 22, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+              decoration: InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+                hintText: '1',
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Text(_error!, style: AppTypography.caption.copyWith(color: AppColors.error)),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [1, 2, 5, 10, 20].map((q) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: ActionChip(
+                    label: Text('+$q'),
+                    onPressed: () {
+                      final current = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
+                      final next = (current + q).clamp(1, widget.totalAvailable);
+                      _qtyCtrl.text = '$next';
+                      _qtyCtrl.selection = TextSelection(
+                        baseOffset: 0,
+                        extentOffset: _qtyCtrl.text.length,
+                      );
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                AppButton(
+                  label: 'Cancel',
+                  variant: AppButtonVariant.ghost,
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                AppButton(
+                  label: 'Add to Cart',
+                  icon: Icons.check_rounded,
+                  variant: AppButtonVariant.primary,
+                  onPressed: _submit,
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

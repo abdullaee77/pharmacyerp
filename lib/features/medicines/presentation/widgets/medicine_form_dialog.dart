@@ -54,32 +54,41 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
   late final TextEditingController _strengthCtrl;
   late final TextEditingController _categoryCtrl;
   late final TextEditingController _manufacturerCtrl;
+  late final TextEditingController _barcodeCtrl;
 
   // Classification
   late DosageForm _dosageForm;
   late DrugSchedule _drugSchedule;
   late bool _prescriptionRequired;
+  late MedicineStatus _status;
 
-  // Pricing
+  // Pricing & Stock Thresholds
   late final TextEditingController _purchasePriceCtrl;
   late final TextEditingController _sellingPriceCtrl;
   late final TextEditingController _mrpCtrl;
   late final TextEditingController _boxSizeCtrl;
   late final TextEditingController _boxPriceCtrl;
+  late final TextEditingController _minStockCtrl;
   late String _unit;
 
   // Storage
   late final TextEditingController _rackCtrl;
   late final TextEditingController _storageCtrl;
 
-  // Opening Stock
-  late final TextEditingController _batchNumberCtrl;
-  late final TextEditingController _openingQtyCtrl;
-  late DateTime _expiryDate;
-
   bool get _isEditing => widget.medicine != null;
 
-  static const _units = ['Tab', 'Cap', 'ml', 'mg', 'g', 'Sachet', 'Tube', 'Bottle', 'Box', 'Piece'];
+  static const _units = [
+    'Tab',
+    'Cap',
+    'ml',
+    'mg',
+    'g',
+    'Sachet',
+    'Tube',
+    'Bottle',
+    'Box',
+    'Piece',
+  ];
 
   @override
   void initState() {
@@ -91,10 +100,12 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
     _strengthCtrl = TextEditingController(text: m?.strength ?? '');
     _categoryCtrl = TextEditingController(text: m?.category ?? '');
     _manufacturerCtrl = TextEditingController(text: m?.manufacturer ?? '');
+    _barcodeCtrl = TextEditingController(text: m?.barcode?.value ?? '');
 
     _dosageForm = m?.dosageForm ?? DosageForm.tablet;
     _drugSchedule = m?.drugSchedule ?? DrugSchedule.none;
     _prescriptionRequired = m?.prescriptionRequired ?? false;
+    _status = m?.status ?? MedicineStatus.active;
 
     _purchasePriceCtrl = TextEditingController(
       text: m != null ? m.purchasePrice.pkr.toStringAsFixed(2) : '',
@@ -109,16 +120,17 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
       text: m != null ? '${m.boxSize}' : '1',
     );
     _boxPriceCtrl = TextEditingController(
-      text: m != null && m.boxPrice.paisa > 0 ? m.boxPrice.pkr.toStringAsFixed(2) : '',
+      text: m != null && m.boxPrice.paisa > 0
+          ? m.boxPrice.pkr.toStringAsFixed(2)
+          : '',
+    );
+    _minStockCtrl = TextEditingController(
+      text: m != null ? '${m.minStockLevel.value}' : '10',
     );
     _unit = m?.unit ?? 'Tab';
 
     _rackCtrl = TextEditingController(text: m?.rackLocation ?? '');
     _storageCtrl = TextEditingController(text: m?.storageInstructions ?? '');
-
-    _batchNumberCtrl = TextEditingController(text: 'BATCH-01');
-    _openingQtyCtrl = TextEditingController();
-    _expiryDate = DateTime.now().add(const Duration(days: 730));
   }
 
   @override
@@ -128,15 +140,15 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
     _strengthCtrl.dispose();
     _categoryCtrl.dispose();
     _manufacturerCtrl.dispose();
+    _barcodeCtrl.dispose();
     _purchasePriceCtrl.dispose();
     _sellingPriceCtrl.dispose();
     _mrpCtrl.dispose();
     _boxSizeCtrl.dispose();
     _boxPriceCtrl.dispose();
+    _minStockCtrl.dispose();
     _rackCtrl.dispose();
     _storageCtrl.dispose();
-    _batchNumberCtrl.dispose();
-    _openingQtyCtrl.dispose();
     super.dispose();
   }
 
@@ -147,7 +159,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
     final boxPrice = _parsePkr(_boxPriceCtrl.text);
     final boxSize = _parseInt(_boxSizeCtrl.text);
     if (boxPrice > 0 && boxSize > 0) {
-      final unitPrice = (boxPrice / boxSize);
+      final unitPrice = boxPrice / boxSize;
       _sellingPriceCtrl.text = unitPrice.toStringAsFixed(2);
     }
   }
@@ -161,23 +173,13 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
     }
   }
 
-  Future<void> _pickExpiry() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _expiryDate,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 3650)),
-    );
-    if (picked != null && mounted) {
-      setState(() => _expiryDate = picked);
-    }
-  }
-
   void _save() {
     if (!_formKey.currentState!.validate()) return;
 
     final now = DateTime.now();
     final m = widget.medicine;
+
+    final bCode = _barcodeCtrl.text.trim();
 
     final medicine = Medicine(
       id: m?.id ?? MedicineId.generate(),
@@ -191,33 +193,22 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
       rackLocation: _rackCtrl.text.trim(),
       drugSchedule: _drugSchedule,
       storageInstructions: _storageCtrl.text.trim(),
-      barcode: m?.barcode,
+      barcode: bCode.isNotEmpty ? Barcode.unsafe(bCode) : null,
       prescriptionRequired: _prescriptionRequired,
-      minStockLevel: m?.minStockLevel ?? Quantity.zero(),
+      minStockLevel: Quantity.create(_parseInt(_minStockCtrl.text)),
       purchasePrice: Money.fromPkr(_parsePkr(_purchasePriceCtrl.text)),
       sellingPrice: Money.fromPkr(_parsePkr(_sellingPriceCtrl.text)),
       mrp: Money.fromPkr(_parsePkr(_mrpCtrl.text)),
       boxSize: _parseInt(_boxSizeCtrl.text) > 0 ? _parseInt(_boxSizeCtrl.text) : 1,
       boxPrice: Money.fromPkr(_parsePkr(_boxPriceCtrl.text)),
-      status: m?.status ?? MedicineStatus.active,
+      status: _status,
       createdAt: m?.createdAt ?? now,
       updatedAt: now,
     );
 
-    OpeningStockInfo? stockInfo;
-    final qty = _parseInt(_openingQtyCtrl.text);
-    if (qty > 0) {
-      final batchNum = _batchNumberCtrl.text.trim().isEmpty ? 'BATCH-01' : _batchNumberCtrl.text.trim();
-      stockInfo = OpeningStockInfo(
-        batchNumber: batchNum,
-        expiryDate: _expiryDate,
-        quantity: qty,
-      );
-    }
-
     Navigator.of(context).pop(MedicineCreationResult(
       medicine: medicine,
-      openingStock: stockInfo,
+      openingStock: null, // Always null now. Handled via Purchase Tab!
     ));
   }
 
@@ -225,7 +216,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
   Widget build(BuildContext context) {
     return Dialog(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 900, maxHeight: 780),
+        constraints: const BoxConstraints(maxWidth: 900, maxHeight: 720),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -234,13 +225,22 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
               padding: const EdgeInsets.all(AppSpacing.lg),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [AppColors.primary, AppColors.primary.withValues(alpha: 0.7)],
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withValues(alpha: 0.7),
+                  ],
                 ),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppRadius.lg),
+                ),
               ),
               child: Row(
                 children: [
-                  Icon(_isEditing ? Icons.edit_rounded : Icons.medication_rounded, color: Colors.white, size: 26),
+                  Icon(
+                    _isEditing ? Icons.edit_rounded : Icons.medication_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
                   const SizedBox(width: AppSpacing.sm),
                   Text(
                     _isEditing ? 'Edit Medicine' : 'Add New Medicine',
@@ -264,16 +264,31 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _buildSectionHeader('Basic Information', Icons.info_outline, AppColors.primary),
+                      _buildSectionHeader(
+                        'Basic Information',
+                        Icons.info_outline,
+                        AppColors.primary,
+                      ),
                       const SizedBox(height: AppSpacing.sm),
                       _buildSectionCard([
                         _field('Medicine Name *', _nameCtrl, required: true),
                         _field('Generic Name', _genericCtrl),
-                        _field('Strength', _strengthCtrl, hint: 'e.g. 500mg'),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _field('Strength', _strengthCtrl, hint: 'e.g. 500mg'),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: _field('Barcode', _barcodeCtrl, hint: 'Scan or type'),
+                            ),
+                          ],
+                        ),
                         Row(
                           children: [
                             Expanded(
                               child: Autocomplete<String>(
+                                initialValue: TextEditingValue(text: _categoryCtrl.text),
                                 optionsBuilder: (val) {
                                   if (val.text.isEmpty) return widget.existingCategories;
                                   return widget.existingCategories.where(
@@ -294,6 +309,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                             const SizedBox(width: AppSpacing.md),
                             Expanded(
                               child: Autocomplete<String>(
+                                initialValue: TextEditingValue(text: _manufacturerCtrl.text),
                                 optionsBuilder: (val) {
                                   if (val.text.isEmpty) return widget.existingManufacturers;
                                   return widget.existingManufacturers.where(
@@ -316,7 +332,11 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                       ]),
 
                       const SizedBox(height: AppSpacing.lg),
-                      _buildSectionHeader('Drug Classification', Icons.science_outlined, AppColors.info),
+                      _buildSectionHeader(
+                        'Drug Classification',
+                        Icons.science_outlined,
+                        AppColors.info,
+                      ),
                       const SizedBox(height: AppSpacing.sm),
                       _buildSectionCard([
                         Row(
@@ -325,10 +345,9 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                               child: DropdownButtonFormField<DosageForm>(
                                 value: _dosageForm,
                                 decoration: _decoration('Dosage Form'),
-                                items: DosageForm.values.map((f) => DropdownMenuItem(
-                                  value: f,
-                                  child: Text(f.label),
-                                )).toList(),
+                                items: DosageForm.values
+                                    .map((f) => DropdownMenuItem(value: f, child: Text(f.label)))
+                                    .toList(),
                                 onChanged: (v) => setState(() => _dosageForm = v!),
                               ),
                             ),
@@ -337,10 +356,9 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                               child: DropdownButtonFormField<DrugSchedule>(
                                 value: _drugSchedule,
                                 decoration: _decoration('Drug Schedule'),
-                                items: DrugSchedule.values.map((s) => DropdownMenuItem(
-                                  value: s,
-                                  child: Text(s.label),
-                                )).toList(),
+                                items: DrugSchedule.values
+                                    .map((s) => DropdownMenuItem(value: s, child: Text(s.label)))
+                                    .toList(),
                                 onChanged: (v) => setState(() => _drugSchedule = v!),
                               ),
                             ),
@@ -349,39 +367,62 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                               child: DropdownButtonFormField<String>(
                                 value: _unit,
                                 decoration: _decoration('Unit'),
-                                items: _units.map((u) => DropdownMenuItem(
-                                  value: u,
-                                  child: Text(u),
-                                )).toList(),
+                                items: _units
+                                    .map((u) => DropdownMenuItem(value: u, child: Text(u)))
+                                    .toList(),
                                 onChanged: (v) => setState(() => _unit = v!),
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        // Wrapped in Material to prevent DecoratedBox ink-splash assertion
-                        Material(
-                          color: Colors.transparent,
-                          child: SwitchListTile(
-                            value: _prescriptionRequired,
-                            onChanged: (v) => setState(() => _prescriptionRequired = v),
-                            title: Text('Prescription Required', style: AppTypography.body),
-                            subtitle: Text('Schedule G/H drugs require prescription', style: AppTypography.caption),
-                            contentPadding: EdgeInsets.zero,
-                            activeColor: AppColors.primary,
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Material(
+                                color: Colors.transparent,
+                                child: SwitchListTile(
+                                  value: _prescriptionRequired,
+                                  onChanged: (v) => setState(() => _prescriptionRequired = v),
+                                  title: Text('Prescription Required', style: AppTypography.body),
+                                  contentPadding: EdgeInsets.zero,
+                                  activeColor: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: DropdownButtonFormField<MedicineStatus>(
+                                value: _status,
+                                decoration: _decoration('Catalog Status'),
+                                items: MedicineStatus.values
+                                    .map((s) => DropdownMenuItem(value: s, child: Text(s.label)))
+                                    .toList(),
+                                onChanged: (v) => setState(() => _status = v!),
+                              ),
+                            ),
+                          ],
                         ),
                       ]),
 
                       const SizedBox(height: AppSpacing.lg),
-                      _buildSectionHeader('Pricing & Packaging', Icons.currency_exchange_rounded, AppColors.success),
+                      _buildSectionHeader(
+                        'Pricing & Packaging',
+                        Icons.currency_exchange_rounded,
+                        AppColors.success,
+                      ),
                       const SizedBox(height: AppSpacing.sm),
                       _buildSectionCard([
                         Row(
                           children: [
                             Expanded(child: _priceField('Purchase Price (PKR)', _purchasePriceCtrl)),
                             const SizedBox(width: AppSpacing.md),
-                            Expanded(child: _priceField('Selling Price (PKR)', _sellingPriceCtrl, onChanged: (_) => _autoCalcFromUnit())),
+                            Expanded(
+                              child: _priceField(
+                                'Selling Price (PKR)',
+                                _sellingPriceCtrl,
+                                onChanged: (_) => _autoCalcFromUnit(),
+                              ),
+                            ),
                             const SizedBox(width: AppSpacing.md),
                             Expanded(child: _priceField('MRP (PKR)', _mrpCtrl)),
                           ],
@@ -399,16 +440,30 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                             ),
                             const SizedBox(width: AppSpacing.md),
                             Expanded(
-                              child: _priceField('Box Price (PKR)', _boxPriceCtrl, onChanged: (_) => _autoCalcFromBox()),
+                              child: _priceField(
+                                'Box Price (PKR)',
+                                _boxPriceCtrl,
+                                onChanged: (_) => _autoCalcFromBox(),
+                              ),
                             ),
                             const SizedBox(width: AppSpacing.md),
-                            const Expanded(child: SizedBox()),
+                            Expanded(
+                              child: TextFormField(
+                                controller: _minStockCtrl,
+                                decoration: _decoration('Min Alert Threshold', hint: 'e.g. 10'),
+                                keyboardType: TextInputType.number,
+                              ),
+                            ),
                           ],
                         ),
                       ]),
 
                       const SizedBox(height: AppSpacing.lg),
-                      _buildSectionHeader('Storage & Location', Icons.warehouse_outlined, AppColors.warning),
+                      _buildSectionHeader(
+                        'Storage & Location',
+                        Icons.warehouse_outlined,
+                        AppColors.warning,
+                      ),
                       const SizedBox(height: AppSpacing.sm),
                       _buildSectionCard([
                         Row(
@@ -419,57 +474,6 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                           ],
                         ),
                       ]),
-
-                      if (!_isEditing) ...[
-                        const SizedBox(height: AppSpacing.lg),
-                        _buildSectionHeader('Opening Stock (Instant Inventory)', Icons.inventory_2_outlined, AppColors.success),
-                        const SizedBox(height: AppSpacing.sm),
-                        _buildSectionCard([
-                          Text(
-                            'Enter opening quantity to immediately make this item available in POS.',
-                            style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _openingQtyCtrl,
-                                  decoration: _decoration('Opening Quantity (Units) *', hint: 'e.g. 100'),
-                                  keyboardType: TextInputType.number,
-                                ),
-                              ),
-                              const SizedBox(width: AppSpacing.md),
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _batchNumberCtrl,
-                                  decoration: _decoration('Batch Number', hint: 'BATCH-01'),
-                                ),
-                              ),
-                              const SizedBox(width: AppSpacing.md),
-                              Expanded(
-                                child: InkWell(
-                                  onTap: _pickExpiry,
-                                  child: InputDecorator(
-                                    decoration: _decoration('Expiry Date'),
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.calendar_today, size: 16, color: AppColors.primary),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          '${_expiryDate.month.toString().padLeft(2, '0')}/${_expiryDate.year}',
-                                          style: AppTypography.body,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ]),
-                      ],
-
                       const SizedBox(height: AppSpacing.md),
                     ],
                   ),
@@ -536,7 +540,12 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
     );
   }
 
-  Widget _field(String label, TextEditingController ctrl, {bool required = false, String? hint}) {
+  Widget _field(
+      String label,
+      TextEditingController ctrl, {
+        bool required = false,
+        String? hint,
+      }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: TextFormField(
@@ -547,7 +556,11 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
     );
   }
 
-  Widget _priceField(String label, TextEditingController ctrl, {ValueChanged<String>? onChanged}) {
+  Widget _priceField(
+      String label,
+      TextEditingController ctrl, {
+        ValueChanged<String>? onChanged,
+      }) {
     return TextFormField(
       controller: ctrl,
       decoration: _decoration(label),

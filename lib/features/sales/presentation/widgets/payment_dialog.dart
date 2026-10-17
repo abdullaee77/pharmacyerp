@@ -9,6 +9,7 @@ import '../../../../core/widgets/components.dart';
 import '../../../../core/services/printer_settings.dart';
 import '../../../../core/services/receipt_printer.dart';
 import '../../../../core/services/receipt_pdf_builder.dart';
+import '../../../accounts/domain/account.dart';
 import '../../../authentication/domain/user.dart';
 import '../../../medicines/domain/value_objects.dart';
 import '../../domain/payment.dart';
@@ -50,6 +51,7 @@ class PaymentDialog extends StatefulWidget {
   final SalesController salesController;
   final String operatorName;
   final User? user;
+  final List<AccountWithBalance> accounts;
 
   const PaymentDialog({
     super.key,
@@ -57,6 +59,7 @@ class PaymentDialog extends StatefulWidget {
     required this.salesController,
     required this.operatorName,
     this.user,
+    this.accounts = const [],
   });
 
   @override
@@ -70,6 +73,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
   final _customerNameCtrl = TextEditingController();
   final _customerPhoneCtrl = TextEditingController();
 
+  String? _accountId;
   bool _isProcessing = false;
 
   @override
@@ -78,6 +82,8 @@ class _PaymentDialogState extends State<PaymentDialog> {
     _receivedCtrl.text = widget.cartController.totals.grandTotal.pkr.toStringAsFixed(2);
     _customerNameCtrl.text = widget.cartController.customerName == 'Walk-in Customer' ? '' : widget.cartController.customerName;
     _customerPhoneCtrl.text = widget.cartController.customerPhone;
+
+    _syncAccountWithMethod(_primaryMethod);
   }
 
   @override
@@ -88,18 +94,79 @@ class _PaymentDialogState extends State<PaymentDialog> {
     super.dispose();
   }
 
+  /// Automatically matches the account dropdown when payment method changes
+  void _onMethodSelected(PaymentMethod method) {
+    setState(() {
+      _primaryMethod = method;
+      _syncAccountWithMethod(method);
+    });
+  }
+
+  void _syncAccountWithMethod(PaymentMethod method) {
+    if (widget.accounts.isEmpty) {
+      _accountId = null;
+      return;
+    }
+
+    if (method == PaymentMethod.credit) {
+      _accountId = null;
+      return;
+    }
+
+    if (method == PaymentMethod.cash) {
+      final cashAccounts = widget.accounts.where((a) => a.account.accountType == AccountType.cash);
+      if (cashAccounts.isNotEmpty) {
+        _accountId = cashAccounts.first.account.id.value;
+      } else {
+        _accountId = widget.accounts.first.account.id.value;
+      }
+    } else {
+      // Card, Bank Transfer, Online, etc. -> Select Bank Account
+      final bankAccounts = widget.accounts.where((a) => a.account.accountType == AccountType.bank);
+      if (bankAccounts.isNotEmpty) {
+        _accountId = bankAccounts.first.account.id.value;
+      } else {
+        _accountId = widget.accounts.first.account.id.value;
+      }
+    }
+  }
+
+  /// Filter accounts shown in dropdown based on payment method
+  List<AccountWithBalance> get _filteredAccounts {
+    if (_primaryMethod == PaymentMethod.cash) {
+      final cashOnly = widget.accounts.where((a) => a.account.accountType == AccountType.cash).toList();
+      return cashOnly.isNotEmpty ? cashOnly : widget.accounts;
+    } else if (!_isCreditSelected) {
+      // Any bank/card/digital method
+      final bankOnly = widget.accounts.where((a) => a.account.accountType == AccountType.bank).toList();
+      return bankOnly.isNotEmpty ? bankOnly : widget.accounts;
+    }
+    return widget.accounts;
+  }
+
   double get _totalTendered => double.tryParse(_receivedCtrl.text.trim()) ?? 0.0;
   double get _grandTotalPkr => widget.cartController.totals.grandTotal.pkr;
   double get _changePkr {
     final diff = _totalTendered - _grandTotalPkr;
     return diff > 0 ? diff : 0.0;
   }
+
   bool get _isCreditSelected => _primaryMethod == PaymentMethod.credit;
   bool get _isPaidInFull => _totalTendered >= _grandTotalPkr;
+
+  double get _netReceivedPkr {
+    if (_isCreditSelected) return _totalTendered.clamp(0.0, _grandTotalPkr);
+    return _grandTotalPkr;
+  }
 
   Future<void> _process() async {
     if (!_isCreditSelected && !_isPaidInFull) {
       AppToast.error(context, 'Amount tendered is less than the total.');
+      return;
+    }
+
+    if (!_isCreditSelected && widget.accounts.isNotEmpty && (_accountId == null || _accountId!.isEmpty)) {
+      AppToast.error(context, 'Select an account to deposit the payment.');
       return;
     }
 
@@ -155,6 +222,8 @@ class _PaymentDialogState extends State<PaymentDialog> {
       sale: sale,
       tenders: tenders,
       customerPhone: cart.customerPhone,
+      accountId: _accountId,
+      accountAmountPaisa: Money.fromPkr(_netReceivedPkr).paisa,
     );
 
     setState(() => _isProcessing = false);
@@ -189,7 +258,6 @@ class _PaymentDialogState extends State<PaymentDialog> {
       createdAt: now,
     );
 
-    // ── Auto-Print Receipt ──
     await _tryAutoPrint(result);
 
     if (mounted) Navigator.of(context).pop(result);
@@ -255,7 +323,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
 
     return Dialog(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 680),
+        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 720),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -332,11 +400,47 @@ class _PaymentDialogState extends State<PaymentDialog> {
                         return ChoiceChip(
                           label: Text(m.label),
                           selected: _primaryMethod == m,
-                          onSelected: (_) => setState(() => _primaryMethod = m),
+                          onSelected: (_) => _onMethodSelected(m),
                         );
                       }).toList(),
                     ),
                     const SizedBox(height: AppSpacing.md),
+
+                    // Deposit account (ledger) - dynamically filtered by payment method
+                    if (!_isCreditSelected && widget.accounts.isNotEmpty) ...[
+                      DropdownButtonFormField<String?>(
+                        value: _accountId,
+                        decoration: const InputDecoration(
+                          labelText: 'Deposit to Account',
+                          prefixIcon: Icon(Icons.account_balance_wallet_outlined),
+                        ),
+                        items: _filteredAccounts.map((awb) => DropdownMenuItem<String?>(
+                          value: awb.account.id.value,
+                          child: Text(awb.account.name),
+                        )).toList(),
+                        onChanged: (v) => setState(() => _accountId = v),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ] else if (_isCreditSelected) ...[
+                      Container(
+                        padding: const EdgeInsets.all(AppSpacing.sm),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceVariant,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                        ),
+                        child: Row(
+                          children: const [
+                            Icon(Icons.info_outline_rounded, size: 18, color: AppColors.textSecondary),
+                            SizedBox(width: AppSpacing.sm),
+                            Text(
+                              'Customer credit sale — No account deposit.',
+                              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
 
                     AppTextField(
                       controller: _receivedCtrl,

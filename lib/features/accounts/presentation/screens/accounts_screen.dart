@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -5,6 +6,7 @@ import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
 import '../../../../core/widgets/permission_gate.dart';
+import '../../../../core/services/app_event_bus.dart';
 import '../../../authentication/presentation/controllers/auth_controller.dart';
 import '../../../users/domain/role.dart';
 import '../../domain/account.dart';
@@ -27,12 +29,26 @@ class AccountsScreen extends StatefulWidget {
 }
 
 class _AccountsScreenState extends State<AccountsScreen> {
+  StreamSubscription<AppEvent>? _eventSub;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.controller.loadAccounts();
     });
+
+    _eventSub = AppEventBus.instance.stream.listen((_) {
+      if (mounted) {
+        widget.controller.loadAccounts(silent: true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _eventSub?.cancel();
+    super.dispose();
   }
 
   bool get _canAdd => PermissionGate.allow(widget.authController.currentUser,
@@ -43,29 +59,27 @@ class _AccountsScreenState extends State<AccountsScreen> {
       PermissionCategory.accounts, PermissionAction.delete);
 
   Future<void> _add() async {
-    final error = await showDialog<String>(
+    final success = await showDialog<bool>(
       context: context,
       builder: (ctx) => AccountFormDialog(controller: widget.controller),
     );
     if (!mounted) return;
-    if (error != null) {
-      AppToast.error(context, error);
-    } else {
-      AppToast.success(context, 'Account added.');
+
+    if (success == true) {
+      AppToast.success(context, 'Account added successfully.');
     }
   }
 
   Future<void> _edit(Account a) async {
-    final error = await showDialog<String>(
+    final success = await showDialog<bool>(
       context: context,
       builder: (ctx) =>
           AccountFormDialog(controller: widget.controller, existing: a),
     );
     if (!mounted) return;
-    if (error != null) {
-      AppToast.error(context, error);
-    } else {
-      AppToast.success(context, 'Account updated.');
+
+    if (success == true) {
+      AppToast.success(context, 'Account updated successfully.');
     }
   }
 
@@ -118,6 +132,12 @@ class _AccountsScreenState extends State<AccountsScreen> {
                   ],
                 ),
                 const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.refresh_rounded, color: AppColors.primary),
+                  tooltip: 'Refresh Accounts',
+                  onPressed: () => ctrl.loadAccounts(),
+                ),
+                const SizedBox(width: AppSpacing.sm),
                 if (_canAdd)
                   AppButton(
                     label: 'Add Account',

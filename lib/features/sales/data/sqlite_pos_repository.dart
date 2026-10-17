@@ -6,6 +6,7 @@ import '../../inventory/data/sqlite_batch_repository.dart';
 import '../../inventory/domain/batch.dart';
 import '../../medicines/data/medicine_model.dart';
 import '../../medicines/domain/medicine.dart';
+import '../../medicines/domain/value_objects.dart';
 import '../domain/pos_models.dart';
 import '../domain/pos_repository.dart';
 
@@ -28,13 +29,20 @@ class SqlitePosRepository implements PosRepository {
       final db = await _db;
       final q = '%${query.trim()}%';
 
-      // Reads max of inventory_stocks or the sum of active batches
+      // Reads total available stock AND pulls the selling price of the earliest active FEFO batch
       final String sqlQuery = '''
         SELECT m.*, 
           MAX(
             COALESCE(s.quantity, 0), 
             COALESCE((SELECT SUM(b.quantity) FROM batches b WHERE b.medicine_id = m.id), 0)
-          ) AS current_stock
+          ) AS current_stock,
+          (
+            SELECT b.selling_price 
+            FROM batches b 
+            WHERE b.medicine_id = m.id AND b.quantity > 0 
+            ORDER BY b.expiry_date ASC 
+            LIMIT 1
+          ) AS fefo_selling_price
         FROM medicines m
         LEFT JOIN inventory_stocks s ON m.id = s.medicine_id
         WHERE (m.name LIKE ? OR m.generic_name LIKE ? OR m.barcode LIKE ? OR m.manufacturer LIKE ?)
@@ -47,8 +55,17 @@ class SqlitePosRepository implements PosRepository {
 
       final results = rows.map((r) {
         final medicine = MedicineModel.fromMap(r).toDomain();
-        final stock = r['current_stock'] as int;
-        return PosSearchResult(medicine: medicine, currentStock: stock);
+        final stock = (r['current_stock'] as num).toInt();
+        final rawFefoPrice = r['fefo_selling_price'] as int?;
+        final fefoSellingPrice = (rawFefoPrice != null && rawFefoPrice > 0)
+            ? Money.fromPaisa(rawFefoPrice)
+            : null;
+
+        return PosSearchResult(
+          medicine: medicine,
+          currentStock: stock,
+          fefoSellingPrice: fefoSellingPrice,
+        );
       }).toList();
 
       return Success(results);
@@ -66,7 +83,14 @@ class SqlitePosRepository implements PosRepository {
           MAX(
             COALESCE(s.quantity, 0), 
             COALESCE((SELECT SUM(b.quantity) FROM batches b WHERE b.medicine_id = m.id), 0)
-          ) AS current_stock
+          ) AS current_stock,
+          (
+            SELECT b.selling_price 
+            FROM batches b 
+            WHERE b.medicine_id = m.id AND b.quantity > 0 
+            ORDER BY b.expiry_date ASC 
+            LIMIT 1
+          ) AS fefo_selling_price
         FROM medicines m
         LEFT JOIN inventory_stocks s ON m.id = s.medicine_id
         WHERE m.barcode = ? AND m.status = 'active'
@@ -81,8 +105,19 @@ class SqlitePosRepository implements PosRepository {
 
       final row = rows.first;
       final med = MedicineModel.fromMap(row).toDomain();
-      final stock = row['current_stock'] as int;
-      return Success(PosSearchResult(medicine: med, currentStock: stock));
+      final stock = (row['current_stock'] as num).toInt();
+      final rawFefoPrice = row['fefo_selling_price'] as int?;
+      final fefoSellingPrice = (rawFefoPrice != null && rawFefoPrice > 0)
+          ? Money.fromPaisa(rawFefoPrice)
+          : null;
+
+      return Success(
+        PosSearchResult(
+          medicine: med,
+          currentStock: stock,
+          fefoSellingPrice: fefoSellingPrice,
+        ),
+      );
     } catch (e) {
       return Failure(DatabaseFailure(message: 'Barcode lookup failed: $e'));
     }

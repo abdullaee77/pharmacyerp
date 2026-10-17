@@ -109,16 +109,17 @@ class HttpInventoryRepository implements InventoryRepository {
     required AdjustmentReason reason,
     String? reference,
     required String operatorName,
+    String? batchId, // ← Added batchId parameter
   }) async {
     // Single atomic call to the server — stock check, update, and movement
-    // log all happen inside one SQLite transaction on the server side.
+    // log all happen inside one transaction on the server side.
     final payload = {
       'medicineId': medicineId.value,
       'quantityChange': quantityChange,
       'reason': reason.name,
       'reference': reference,
       'operatorName': operatorName,
-      'batchId': null,
+      'batchId': batchId, // ← Forwarding batchId to payload
     };
 
     final res = await _api.adjustStock(payload);

@@ -70,6 +70,32 @@ class MedicineController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Bulk create medicines from import. Returns summary string.
+  Future<String> bulkCreateMedicines(List<Medicine> medicinesList) async {
+    var ok = 0;
+    var fail = 0;
+    final errors = <String>[];
+
+    for (final m in medicinesList) {
+      final result = await _repository.createMedicine(m);
+      result.fold(
+        onSuccess: (_) => ok++,
+        onFailure: (f) {
+          fail++;
+          errors.add('${m.name}: ${f.message}');
+        },
+      );
+    }
+
+    await loadMedicines();
+    await loadFilterOptions();
+
+    if (fail == 0) {
+      return 'Imported $ok medicines successfully.';
+    }
+    return 'Imported $ok, failed $fail.\n${errors.take(3).join("\n")}';
+  }
+
   /// Creates a medicine and optionally initializes opening stock.
   /// Returns null on success, or an error message on failure.
   Future<String?> createMedicineWithStock(MedicineCreationResult result) async {

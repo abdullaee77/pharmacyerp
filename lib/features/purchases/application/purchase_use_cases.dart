@@ -1,4 +1,3 @@
-// lib/features/purchases/application/purchase_use_cases.dart
 import '../../../core/error/failures.dart';
 import '../../../core/result/result.dart';
 import '../domain/purchase.dart';
@@ -10,23 +9,32 @@ class ReceivePurchaseUseCase {
 
   const ReceivePurchaseUseCase({
     required PurchaseRepository purchaseRepository,
-    // Dependency parameters left in constructor to avoid breaking compilation
     dynamic inventoryRepository,
     dynamic batchRepository,
     dynamic supplierRepository,
   }) : _purchaseRepository = purchaseRepository;
 
-  Future<Result<Purchase>> execute(Purchase purchase) async {
+  Future<Result<Purchase>> execute(
+      Purchase purchase, {
+        String? accountId,
+        int amountPaidPaisa = 0,
+      }) async {
     if (purchase.items.isEmpty) {
       return const Failure(
         ValidationFailure(message: 'Purchase items list cannot be empty.'),
       );
     }
 
-    // Hand responsibility over to the atomic repository checkout handler
-    final saveResult = await _purchaseRepository.createPurchase(purchase);
-    if (saveResult.isFailure) return saveResult;
+    // Auto-create supplier REMOVED strictly matching user instructions.
+    // Supplier MUST be selected from the existing database entries.
 
+    final saveResult = await _purchaseRepository.createPurchase(
+      purchase,
+      accountId: accountId,
+      amountPaidPaisa: amountPaidPaisa,
+    );
+
+    if (saveResult.isFailure) return saveResult;
     return Success(purchase);
   }
 }
@@ -74,7 +82,6 @@ class CreatePurchaseReturnUseCase {
       }
     }
 
-    // Execute atomic purchase return transaction
     final saveResult = await _purchaseRepository.createPurchaseReturn(returnDoc);
     if (saveResult.isFailure) return saveResult;
 

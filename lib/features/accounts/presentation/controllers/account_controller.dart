@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../../core/services/app_event_bus.dart';
 import '../../application/account_use_cases.dart';
 import '../../domain/account.dart';
 import '../../domain/account_repository.dart';
@@ -11,12 +13,25 @@ class AccountController extends ChangeNotifier {
   final DeleteAccountUseCase _delete;
   final GetAccountLedgerUseCase _getLedger;
 
+  StreamSubscription<AppEvent>? _eventSub;
+
   AccountController({required AccountRepository repository})
       : _getAccounts = GetAccountsUseCase(repository),
         _create = CreateAccountUseCase(repository),
         _update = UpdateAccountUseCase(repository),
         _delete = DeleteAccountUseCase(repository),
-        _getLedger = GetAccountLedgerUseCase(repository);
+        _getLedger = GetAccountLedgerUseCase(repository) {
+    // Automatically reload accounts whenever an event occurs across the app (sales, purchases, expenses)
+    _eventSub = AppEventBus.instance.stream.listen((_) {
+      loadAccounts(silent: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _eventSub?.cancel();
+    super.dispose();
+  }
 
   List<AccountWithBalance> _accounts = [];
   bool _isLoading = false;
@@ -64,6 +79,7 @@ class AccountController extends ChangeNotifier {
     final r = await _create.execute(a);
     return r.fold(onSuccess: (_) {
       loadAccounts();
+      AppEventBus.instance.fire(AppEvent.saleCompleted);
       return null;
     }, onFailure: (f) => f.message);
   }
@@ -72,6 +88,7 @@ class AccountController extends ChangeNotifier {
     final r = await _update.execute(a);
     return r.fold(onSuccess: (_) {
       loadAccounts();
+      AppEventBus.instance.fire(AppEvent.saleCompleted);
       return null;
     }, onFailure: (f) => f.message);
   }
@@ -80,6 +97,7 @@ class AccountController extends ChangeNotifier {
     final r = await _delete.execute(id);
     return r.fold(onSuccess: (_) {
       loadAccounts();
+      AppEventBus.instance.fire(AppEvent.saleCompleted);
       return null;
     }, onFailure: (f) => f.message);
   }

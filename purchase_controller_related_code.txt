@@ -1,0 +1,1684 @@
+========== FILE: lib/features/purchases/presentation/controllers/purchase_controller.dart ==========
+import 'package:flutter/material.dart';
+import '../../../inventory/domain/batch_repository.dart';
+import '../../../inventory/domain/inventory_repository.dart';
+import '../../../suppliers/domain/supplier_repository.dart';
+import '../../application/purchase_use_cases.dart';
+import '../../domain/purchase.dart';
+import '../../domain/purchase_repository.dart';
+import '../../domain/purchase_return.dart';
+
+class PurchaseController extends ChangeNotifier {
+  final ReceivePurchaseUseCase _receive;
+  final GetPurchasesUseCase _getPurchases;
+  final CreatePurchaseReturnUseCase _createReturn;
+  final PurchaseRepository _purchaseRepository;
+
+  PurchaseController({
+    required PurchaseRepository purchaseRepository,
+    required InventoryRepository inventoryRepository,
+    required BatchRepository batchRepository,
+    SupplierRepository? supplierRepository,
+  })  : _purchaseRepository = purchaseRepository,
+        _receive = ReceivePurchaseUseCase(
+          purchaseRepository: purchaseRepository,
+          inventoryRepository: inventoryRepository,
+          batchRepository: batchRepository,
+          supplierRepository: supplierRepository,
+        ),
+        _getPurchases = GetPurchasesUseCase(purchaseRepository),
+        _createReturn = CreatePurchaseReturnUseCase(
+          purchaseRepository: purchaseRepository,
+          inventoryRepository: inventoryRepository,
+        );
+
+  List<Purchase> _purchases = [];
+  bool _isLoading = false;
+  String? _error;
+  String _searchQuery = '';
+
+  List<Purchase> get purchases => _purchases;
+  bool get isLoading => _isLoading;
+  String? get error => _error;
+  String get searchQuery => _searchQuery;
+
+  Future<void> loadPurchases({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
+
+    final result = await _getPurchases.execute(
+        searchQuery: _searchQuery.isEmpty ? null : _searchQuery);
+    result.fold(
+      onSuccess: (data) {
+        _purchases = data;
+        _error = null;
+        _isLoading = false;
+        notifyListeners();
+      },
+      onFailure: (f) {
+        _error = f.message;
+        _isLoading = false;
+        notifyListeners();
+      },
+    );
+  }
+
+  void search(String query) {
+    _searchQuery = query;
+    loadPurchases();
+  }
+
+  Future<String?> receivePurchase(Purchase purchase) async {
+    final result = await _receive.execute(purchase);
+    return result.fold(
+      onSuccess: (_) {
+        loadPurchases();
+        return null;
+      },
+      onFailure: (f) => f.message,
+    );
+  }
+
+  Future<String?> createReturn({
+    required Purchase originalPurchase,
+    required PurchaseReturn returnDoc,
+  }) async {
+    final result = await _createReturn.execute(
+        originalPurchase: originalPurchase, returnDoc: returnDoc);
+    return result.fold(
+      onSuccess: (_) {
+        loadPurchases();
+        return null;
+      },
+      onFailure: (f) => f.message,
+    );
+  }
+
+  Future<Map<String, int>> loadReturnedQuantities(PurchaseId id) async {
+    final result = await _purchaseRepository.getReturnedQuantities(id);
+    return result.fold(
+      onSuccess: (d) => d,
+      onFailure: (_) => {},
+    );
+  }
+}
+
+========== FILE: lib/features/medicines/domain/medicine.dart ==========
+import 'dart:math';
+import '../../../core/domain/entity.dart';
+import '../../../core/domain/value_object.dart';
+import 'value_objects.dart';
+
+class MedicineId extends ValueObject {
+  final String value;
+  const MedicineId(this.value);
+
+  factory MedicineId.generate() {
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final rand = Random().nextInt(99999).toString().padLeft(5, '0');
+    return MedicineId('med_${ts}_$rand');
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+          other is MedicineId && runtimeType == other.runtimeType && value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() => value;
+}
+
+enum MedicineStatus {
+  active(label: 'Active'),
+  inactive(label: 'Inactive'),
+  discontinued(label: 'Discontinued');
+
+  final String label;
+  const MedicineStatus({required this.label});
+}
+
+enum DosageForm {
+  tablet(label: 'Tablet'),
+  capsule(label: 'Capsule'),
+  syrup(label: 'Syrup'),
+  injection(label: 'Injection'),
+  cream(label: 'Cream'),
+  ointment(label: 'Ointment'),
+  drops(label: 'Drops'),
+  inhaler(label: 'Inhaler'),
+  suppository(label: 'Suppository'),
+  powder(label: 'Powder'),
+  gel(label: 'Gel'),
+  spray(label: 'Spray'),
+  solution(label: 'Solution'),
+  suspension(label: 'Suspension'),
+  sachet(label: 'Sachet'),
+  lotion(label: 'Lotion'),
+  shampoo(label: 'Shampoo'),
+  soap(label: 'Soap'),
+  other(label: 'Other');
+
+  final String label;
+  const DosageForm({required this.label});
+}
+
+/// Pakistan drug schedules (Abu Zarr style)
+enum DrugSchedule {
+  none(label: 'None'),
+  scheduleG(label: 'Schedule G'),
+  scheduleH(label: 'Schedule H'),
+  scheduleI(label: 'Schedule I'),
+  scheduleJ(label: 'Schedule J'),
+  scheduleK(label: 'Schedule K'),
+  scheduleL(label: 'Schedule L'),
+  scheduleM(label: 'Schedule M'),
+  scheduleN(label: 'Schedule N');
+
+  final String label;
+  const DrugSchedule({required this.label});
+}
+
+class Medicine extends Entity<MedicineId> {
+  final String name;
+  final String genericName;
+  final String manufacturer;
+  final DosageForm dosageForm;
+  final String strength;
+  final String category;
+  final String unit;
+  final String rackLocation;
+  final DrugSchedule drugSchedule;
+  final String storageInstructions;
+  final Barcode? barcode;
+  final bool prescriptionRequired;
+  final Quantity minStockLevel;
+  final Money purchasePrice;
+  final Money sellingPrice;
+  final Money mrp;
+  final int boxSize;
+  final Money boxPrice;
+  final MedicineStatus status;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  const Medicine({
+    required super.id,
+    required this.name,
+    required this.genericName,
+    required this.manufacturer,
+    required this.dosageForm,
+    required this.strength,
+    required this.category,
+    this.unit = 'Tab',
+    this.rackLocation = '',
+    this.drugSchedule = DrugSchedule.none,
+    this.storageInstructions = '',
+    this.barcode,
+    this.prescriptionRequired = false,
+    required this.minStockLevel,
+    required this.purchasePrice,
+    required this.sellingPrice,
+    required this.mrp,
+    this.boxSize = 1,
+    this.boxPrice = const Money(paisa: 0),
+    this.status = MedicineStatus.active,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  int get packSize => boxSize;
+
+  Money get effectiveSellingPrice {
+    if (sellingPrice.paisa > 0) return sellingPrice;
+    if (boxPrice.paisa > 0 && boxSize > 0) {
+      return Money(paisa: boxPrice.paisa ~/ boxSize);
+    }
+    return sellingPrice;
+  }
+
+  Money get effectivePurchasePrice {
+    if (purchasePrice.paisa > 0) return purchasePrice;
+    if (boxPrice.paisa > 0 && boxSize > 0) {
+      return Money(paisa: boxPrice.paisa ~/ boxSize);
+    }
+    return purchasePrice;
+  }
+
+  Money get profitPerUnit => effectiveSellingPrice - effectivePurchasePrice;
+  bool get isPriceValid => sellingPrice.paisa <= mrp.paisa || mrp.isZero;
+
+  Medicine copyWith({
+    String? name,
+    String? genericName,
+    String? manufacturer,
+    DosageForm? dosageForm,
+    String? strength,
+    String? category,
+    String? unit,
+    String? rackLocation,
+    DrugSchedule? drugSchedule,
+    String? storageInstructions,
+    Barcode? barcode,
+    bool? prescriptionRequired,
+    Quantity? minStockLevel,
+    Money? purchasePrice,
+    Money? sellingPrice,
+    Money? mrp,
+    int? boxSize,
+    Money? boxPrice,
+    MedicineStatus? status,
+    DateTime? updatedAt,
+  }) {
+    return Medicine(
+      id: id,
+      name: name ?? this.name,
+      genericName: genericName ?? this.genericName,
+      manufacturer: manufacturer ?? this.manufacturer,
+      dosageForm: dosageForm ?? this.dosageForm,
+      strength: strength ?? this.strength,
+      category: category ?? this.category,
+      unit: unit ?? this.unit,
+      rackLocation: rackLocation ?? this.rackLocation,
+      drugSchedule: drugSchedule ?? this.drugSchedule,
+      storageInstructions: storageInstructions ?? this.storageInstructions,
+      barcode: barcode ?? this.barcode,
+      prescriptionRequired: prescriptionRequired ?? this.prescriptionRequired,
+      minStockLevel: minStockLevel ?? this.minStockLevel,
+      purchasePrice: purchasePrice ?? this.purchasePrice,
+      sellingPrice: sellingPrice ?? this.sellingPrice,
+      mrp: mrp ?? this.mrp,
+      boxSize: boxSize ?? this.boxSize,
+      boxPrice: boxPrice ?? this.boxPrice,
+      status: status ?? this.status,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? DateTime.now(),
+    );
+  }
+
+  @override
+  String toString() => 'Medicine($name, ${dosageForm.label}, $strength)';
+}
+
+========== FILE: lib/features/medicines/domain/value_objects.dart ==========
+import '../../../core/domain/value_object.dart';
+
+/// Money value object using integer minor units (paisa) to avoid
+/// floating-point rounding errors in financial calculations.
+///
+/// 1 PKR = 100 paisa.
+/// PKR 150.50 → paisa 15050.
+class Money extends ValueObject {
+  /// Amount in minor units (paisa).
+  final int paisa;
+
+  const Money({required this.paisa});
+
+  /// Create from a PKR double value. Use only for UI input conversion.
+  factory Money.fromPkr(double pkr) => Money(paisa: (pkr * 100).round());
+
+  /// Create directly from integer paisa (preferred for storage/domain).
+  factory Money.fromPaisa(int paisa) => Money(paisa: paisa);
+
+  /// Zero amount.
+  factory Money.zero() => const Money(paisa: 0);
+
+  /// Convert to PKR double for display only.
+  double get pkr => paisa / 100;
+
+  /// Formatted display string.
+  String get display => 'PKR ${pkr.toStringAsFixed(2)}';
+
+  bool get isZero => paisa == 0;
+  bool get isPositive => paisa > 0;
+
+  Money operator +(Money other) => Money(paisa: paisa + other.paisa);
+  Money operator -(Money other) => Money(paisa: paisa - other.paisa);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+          other is Money && runtimeType == other.runtimeType && paisa == other.paisa;
+
+  @override
+  int get hashCode => paisa.hashCode;
+
+  @override
+  String toString() => display;
+}
+
+/// Barcode value object with domain validation.
+class Barcode extends ValueObject {
+  final String value;
+
+  const Barcode._(this.value);
+
+  /// Creates a Barcode after validation.
+  /// Returns null if the barcode is empty or invalid.
+  static Barcode? create(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+    if (trimmed.length > 50) return null;
+    return Barcode._(trimmed);
+  }
+
+  /// Creates a Barcode without validation (for known-good data from DB).
+  factory Barcode.unsafe(String value) => Barcode._(value);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+          other is Barcode && runtimeType == other.runtimeType && value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() => value;
+}
+
+/// Quantity value object ensuring non-negative inventory counts.
+class Quantity extends ValueObject {
+  final int value;
+
+  const Quantity._(this.value);
+
+  /// Creates a Quantity, clamping to zero if negative.
+  factory Quantity.create(int amount) =>
+      Quantity._(amount < 0 ? 0 : amount);
+
+  factory Quantity.zero() => const Quantity._(0);
+
+  bool get isZero => value == 0;
+  bool get isLow => value > 0 && value <= 10;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+          other is Quantity && runtimeType == other.runtimeType && value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() => '$value';
+}
+
+========== FILE: lib/features/medicines/data/sqlite_medicine_repository.dart ==========
+import 'package:sqflite/sqflite.dart';
+import '../../../core/data/database_helper.dart';
+import '../../../core/error/failures.dart';
+import '../../../core/result/result.dart';
+import '../domain/medicine.dart';
+import '../domain/medicine_repository.dart';
+import 'medicine_model.dart';
+
+/// SQLite implementation of [MedicineRepository].
+///
+/// All database access is isolated here. The domain layer never
+/// knows that SQLite exists.
+class SqliteMedicineRepository implements MedicineRepository {
+  final DatabaseHelper _dbHelper;
+
+  SqliteMedicineRepository({DatabaseHelper? dbHelper})
+    : _dbHelper = dbHelper ?? DatabaseHelper.instance;
+
+  Future<Database> get _db => _dbHelper.database;
+
+  @override
+  Future<Result<List<Medicine>>> getMedicines({
+    MedicineFilter filter = const MedicineFilter(),
+  }) async {
+    try {
+      final db = await _db;
+      final whereClauses = <String>[];
+      final whereArgs = <dynamic>[];
+
+      if (filter.searchQuery != null && filter.searchQuery!.isNotEmpty) {
+        whereClauses.add(
+          '(name LIKE ? OR generic_name LIKE ? OR barcode LIKE ? OR manufacturer LIKE ?)',
+        );
+        final q = '%${filter.searchQuery}%';
+        whereArgs.addAll([q, q, q, q]);
+      }
+      if (filter.category != null && filter.category!.isNotEmpty) {
+        whereClauses.add('category = ?');
+        whereArgs.add(filter.category);
+      }
+      if (filter.manufacturer != null && filter.manufacturer!.isNotEmpty) {
+        whereClauses.add('manufacturer = ?');
+        whereArgs.add(filter.manufacturer);
+      }
+      if (filter.status != null) {
+        whereClauses.add('status = ?');
+        whereArgs.add(filter.status!.name);
+      }
+      if (filter.prescriptionOnly == true) {
+        whereClauses.add('prescription_required = 1');
+      }
+
+      final where = whereClauses.isNotEmpty ? whereClauses.join(' AND ') : null;
+
+      final rows = await db.query(
+        'medicines',
+        where: where,
+        whereArgs: whereArgs.isNotEmpty ? whereArgs : null,
+        orderBy: 'name ASC',
+      );
+
+      final medicines = rows
+          .map((row) => MedicineModel.fromMap(row).toDomain())
+          .toList();
+      return Success(medicines);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load medicines: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Medicine>> getMedicineById(MedicineId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'medicines',
+        where: 'id = ?',
+        whereArgs: [id.value],
+        limit: 1,
+      );
+
+      if (rows.isEmpty) {
+        return const Failure(NotFoundFailure(message: 'Medicine not found.'));
+      }
+
+      return Success(MedicineModel.fromMap(rows.first).toDomain());
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load medicine: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Medicine>> getMedicineByBarcode(String barcode) async {
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'medicines',
+        where: 'barcode = ?',
+        whereArgs: [barcode],
+        limit: 1,
+      );
+
+      if (rows.isEmpty) {
+        return const Failure(
+          NotFoundFailure(message: 'No medicine found for this barcode.'),
+        );
+      }
+
+      return Success(MedicineModel.fromMap(rows.first).toDomain());
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Barcode lookup failed: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Medicine>> createMedicine(Medicine medicine) async {
+    try {
+      final db = await _db;
+
+      // Check barcode uniqueness
+      if (medicine.barcode != null) {
+        final existing = await db.query(
+          'medicines',
+          where: 'barcode = ?',
+          whereArgs: [medicine.barcode!.value],
+          limit: 1,
+        );
+        if (existing.isNotEmpty) {
+          return const Failure(
+            ValidationFailure(
+              message: 'This barcode is already assigned to another medicine.',
+            ),
+          );
+        }
+      }
+
+      final model = MedicineModel.fromDomain(medicine);
+      await db.insert('medicines', model.toMap());
+      return Success(medicine);
+    } on DatabaseException catch (e) {
+      if (e.isUniqueConstraintError()) {
+        return const Failure(
+          ValidationFailure(
+            message: 'A medicine with this barcode already exists.',
+          ),
+        );
+      }
+      return Failure(DatabaseFailure(message: 'Failed to save medicine: $e'));
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to save medicine: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Medicine>> updateMedicine(Medicine medicine) async {
+    try {
+      final db = await _db;
+
+      // Check barcode uniqueness (exclude self)
+      if (medicine.barcode != null) {
+        final existing = await db.query(
+          'medicines',
+          where: 'barcode = ? AND id != ?',
+          whereArgs: [medicine.barcode!.value, medicine.id.value],
+          limit: 1,
+        );
+        if (existing.isNotEmpty) {
+          return const Failure(
+            ValidationFailure(
+              message: 'This barcode is already assigned to another medicine.',
+            ),
+          );
+        }
+      }
+
+      final model = MedicineModel.fromDomain(medicine);
+      final rows = await db.update(
+        'medicines',
+        model.toMap(),
+        where: 'id = ?',
+        whereArgs: [medicine.id.value],
+      );
+
+      if (rows == 0) {
+        return const Failure(
+          NotFoundFailure(message: 'Medicine not found for update.'),
+        );
+      }
+
+      return Success(medicine);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to update medicine: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> deleteMedicine(MedicineId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.delete(
+        'medicines',
+        where: 'id = ?',
+        whereArgs: [id.value],
+      );
+
+      if (rows == 0) {
+        return const Failure(
+          NotFoundFailure(message: 'Medicine not found for deletion.'),
+        );
+      }
+
+      return const Success(null);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to delete medicine: $e'));
+    }
+  }
+
+  @override
+  Future<Result<List<String>>> getCategories() async {
+    try {
+      final db = await _db;
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT category FROM medicines WHERE category != "" ORDER BY category ASC',
+      );
+      final categories = rows.map((r) => r['category'] as String).toList();
+      return Success(categories);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load categories: $e'));
+    }
+  }
+
+  @override
+  Future<Result<List<String>>> getManufacturers() async {
+    try {
+      final db = await _db;
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT manufacturer FROM medicines WHERE manufacturer != "" ORDER BY manufacturer ASC',
+      );
+      final manufacturers = rows
+          .map((r) => r['manufacturer'] as String)
+          .toList();
+      return Success(manufacturers);
+    } catch (e) {
+      return Failure(
+        DatabaseFailure(message: 'Failed to load manufacturers: $e'),
+      );
+    }
+  }
+}
+
+========== FILE: lib/features/purchases/presentation/screens/purchase_workspace_screen.dart ==========
+import 'package:flutter/material.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/theme/app_radius.dart';
+import '../../../../core/theme/app_typography.dart';
+import '../../../../core/widgets/components.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../authentication/presentation/controllers/auth_controller.dart';
+import '../../../inventory/presentation/controllers/batch_controller.dart';
+import '../../../inventory/presentation/screens/batch_list_screen.dart';
+import '../../../users/domain/role.dart';
+import '../../domain/purchase.dart';
+import '../controllers/purchase_controller.dart';
+import '../widgets/purchase_form_dialog.dart';
+import '../widgets/purchase_return_dialog.dart';
+
+class PurchaseWorkspaceScreen extends StatefulWidget {
+  final PurchaseController controller;
+  final BatchController batchController;
+  final AuthController authController;
+
+  const PurchaseWorkspaceScreen({
+    super.key,
+    required this.controller,
+    required this.batchController,
+    required this.authController,
+  });
+
+  @override
+  State<PurchaseWorkspaceScreen> createState() =>
+      _PurchaseWorkspaceScreenState();
+}
+
+class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.controller.loadPurchases();
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  bool get _canAdd => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.purchases, PermissionAction.add);
+
+  bool get _canReturn => PermissionGate.allow(widget.authController.currentUser,
+      PermissionCategory.purchases, PermissionAction.returnAction);
+
+  Future<void> _openReceiveForm() async {
+    final error = await showDialog<String>(
+      context: context,
+      builder: (ctx) => PurchaseFormDialog(controller: widget.controller),
+    );
+    if (error != null && mounted) {
+      AppToast.error(context, error);
+    } else if (error == null && mounted) {
+      AppToast.success(
+        context,
+        'Purchase received and physical stock levels increased.',
+      );
+    }
+  }
+
+  Future<void> _openReturn(Purchase p) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => PurchaseReturnDialog(
+        purchase: p,
+        controller: widget.controller,
+        operatorName: widget.authController.currentUser?.fullName ?? 'Operator',
+      ),
+    );
+    if (result == true && mounted) {
+      AppToast.success(
+        context,
+        'Stock deducted and purchase return processed.',
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final ctrl = widget.controller;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.shopping_bag_rounded,
+                  color: AppColors.primary,
+                  size: 28,
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Purchasing & Procurement',
+                      style: AppTypography.pageTitle,
+                    ),
+                    Text(
+                      '${ctrl.purchases.length} stock receipts on file',
+                      style: AppTypography.bodySmall,
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                if (_canAdd)
+                  AppButton(
+                    label: 'Receive Purchase',
+                    icon: Icons.add_rounded,
+                    variant: AppButtonVariant.primary,
+                    onPressed: _openReceiveForm,
+                  ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+
+            TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              tabs: const [
+                Tab(text: 'Procurement History'),
+                Tab(text: 'Physical Batches / Expiry'),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildProcurementTab(ctrl),
+                  BatchListScreen(
+                    controller: widget.batchController,
+                    authController: widget.authController,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildProcurementTab(PurchaseController ctrl) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AppSearchBar(
+          hint: 'Search invoice or supplier name...',
+          maxWidth: 400,
+          onSearch: ctrl.search,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Expanded(child: _buildTable(ctrl)),
+      ],
+    );
+  }
+
+  Widget _buildTable(PurchaseController ctrl) {
+    if (ctrl.isLoading) {
+      return const AppLoading(message: 'Loading procurement files...');
+    }
+    if (ctrl.error != null) {
+      return AppEmptyState(
+        icon: Icons.error_outline_rounded,
+        title: ctrl.error!,
+        actionLabel: 'Retry',
+        onAction: ctrl.loadPurchases,
+      );
+    }
+    if (ctrl.purchases.isEmpty) {
+      return const AppEmptyState(
+        icon: Icons.receipt_long_rounded,
+        title: 'No purchases recorded',
+        subtitle: 'Receive purchase invoices to add inventory stocks.',
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: SingleChildScrollView(
+          child: DataTable(
+            headingRowHeight: 44,
+            dataRowMinHeight: 46,
+            dataRowMaxHeight: 52,
+            horizontalMargin: AppSpacing.lg,
+            columnSpacing: AppSpacing.xl,
+            headingRowColor: WidgetStatePropertyAll(AppColors.surfaceVariant),
+            columns: const [
+              DataColumn(label: Text('Invoice ID')),
+              DataColumn(label: Text('Supplier')),
+              DataColumn(label: Text('Date Received')),
+              DataColumn(label: Text('Line Items'), numeric: true),
+              DataColumn(label: Text('Total Cost'), numeric: true),
+              DataColumn(label: Text('Procurement Status')),
+              DataColumn(label: Text('Actions')),
+            ],
+            rows: ctrl.purchases.map((p) {
+              AppBadgeVariant variant;
+              switch (p.status) {
+                case PurchaseStatus.completed:
+                  variant = AppBadgeVariant.success;
+                case PurchaseStatus.partiallyReturned:
+                  variant = AppBadgeVariant.warning;
+                case PurchaseStatus.returned:
+                  variant = AppBadgeVariant.error;
+              }
+
+              final dateStr =
+                  '${p.createdAt.day.toString().padLeft(2, '0')}/'
+                  '${p.createdAt.month.toString().padLeft(2, '0')}/'
+                  '${p.createdAt.year}';
+
+              return DataRow(
+                cells: [
+                  DataCell(
+                    Text(
+                      p.invoiceNumber.value,
+                      style: AppTypography.subtitle.copyWith(fontSize: 13),
+                    ),
+                  ),
+                  DataCell(
+                    Text(p.supplierName, style: AppTypography.tableCell),
+                  ),
+                  DataCell(Text(dateStr, style: AppTypography.tableCell)),
+                  DataCell(
+                    Text('${p.items.length}', style: AppTypography.numeric),
+                  ),
+                  DataCell(
+                    Text(
+                      p.grandTotal.display,
+                      style: AppTypography.numeric.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  DataCell(
+                    AppBadge(
+                      label: p.status.label,
+                      variant: variant,
+                      isDot: true,
+                    ),
+                  ),
+                  DataCell(
+                    _canReturn
+                        ? AppButton(
+                      label: 'Supplier Return',
+                      icon: Icons.assignment_return_outlined,
+                      variant: AppButtonVariant.outlined,
+                      size: AppButtonSize.small,
+                      onPressed: p.status == PurchaseStatus.returned
+                          ? null
+                          : () => _openReturn(p),
+                    )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+========== FILE: lib/app/app.dart ==========
+// // lib/app/app.dart
+//
+// import 'dart:io';
+// import 'package:flutter/material.dart';
+// import 'package:window_manager/window_manager.dart';
+//
+// import '../core/data/database_helper.dart';
+// import '../core/network/api_client.dart';
+// import '../core/network/api_server.dart';
+// import '../core/network/connection_tracker.dart';
+// import '../core/network/network_config.dart';
+// import '../core/theme/app_theme.dart';
+// import '../features/authentication/data/http_auth_repository.dart';
+// import '../features/authentication/data/sqlite_auth_repository.dart';
+// import '../features/authentication/presentation/controllers/auth_controller.dart';
+// // NOTE: We now import the unified OnboardingScreen instead of LoginScreen
+// import '../features/authentication/presentation/screens/onboarding_screen.dart';
+// import '../features/licensing/data/mock_license_repository.dart';
+// import '../features/licensing/domain/license.dart';
+// import '../features/settings/data/sqlite_settings_repository.dart';
+// import '../features/shell/presentation/screens/shell_screen.dart';
+//
+// class PharmacyApp extends StatefulWidget {
+//   const PharmacyApp({super.key});
+//
+//   @override
+//   State<PharmacyApp> createState() => _PharmacyAppState();
+// }
+//
+// class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver, WindowListener {
+//   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+//   AuthController? _authController;
+//   ApiServer? _autoServer;
+//   final _licenseRepo = MockLicenseRepository();
+//
+//   bool _isInitialized = false;
+//   String? _dbError;
+//   bool _isClosing = false;
+//
+//   @override
+//   void initState() {
+//     super.initState();
+//     WidgetsBinding.instance.addObserver(this);
+//
+//     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+//       windowManager.addListener(this);
+//     }
+//
+//     _initApp();
+//   }
+//
+//   @override
+//   void onWindowClose() async {
+//     if (_isClosing) return;
+//     _isClosing = true;
+//
+//     try {
+//       if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+//         await windowManager.hide();
+//       }
+//       await DatabaseHelper.createBackup();
+//       debugPrint('[Auto-Backup] Close backup completed successfully.');
+//     } catch (e) {
+//       debugPrint('[Auto-Backup] Close backup error: $e');
+//     } finally {
+//       try {
+//         _autoServer?.stop();
+//       } catch (_) {}
+//       exit(0);
+//     }
+//   }
+//
+//   @override
+//   void didChangeAppLifecycleState(AppLifecycleState state) {
+//     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+//       DatabaseHelper.createBackup();
+//     }
+//   }
+//
+//   Future<void> _initApp() async {
+//     try {
+//       await DatabaseHelper.instance.database;
+//
+//       final settingsRepo = SqliteSettingsRepository();
+//       final settingsResult = await settingsRepo.getAllSettings();
+//       settingsResult.fold(
+//         onSuccess: (settings) {
+//           final map = {for (final s in settings) s.key: s.value};
+//           NetworkConfig.instance.loadFromSettings(map);
+//         },
+//         onFailure: (_) {},
+//       );
+//
+//       final isClient = NetworkConfig.instance.isClient;
+//       final authRepo = isClient
+//           ? HttpAuthRepository(api: ApiClient.instance, localFallback: SqliteAuthRepository())
+//           : SqliteAuthRepository();
+//
+//       _authController = AuthController(authRepository: authRepo);
+//       ApiClient.instance.onSessionExpired = isClient ? _handleSessionExpired : null;
+//
+//       if (NetworkConfig.instance.isServer && NetworkConfig.instance.autoStartServer) {
+//         _startAutoServer();
+//       }
+//
+//       await DatabaseHelper.createBackup();
+//       await _evaluateAppFlow();
+//     } catch (e) {
+//       if (mounted) {
+//         setState(() {
+//           _dbError = e.toString();
+//         });
+//       }
+//     }
+//   }
+//
+//   Future<void> _evaluateAppFlow() async {
+//     // If the user was already logged in from a previous session, verify their license hasn't expired
+//     if (_authController!.isAuthenticated) {
+//       final licResult = await _licenseRepo.getLicenseInfo();
+//       bool isExpired = false;
+//
+//       licResult.fold(
+//         onSuccess: (info) => isExpired = (info.status == LicenseStatus.expired),
+//         onFailure: (_) {},
+//       );
+//
+//       // If expired while they were away, log them out.
+//       // The OnboardingScreen will force them to the renewal tab when they try to log back in.
+//       if (isExpired) {
+//         await _authController!.logout();
+//       }
+//     }
+//
+//     if (mounted) {
+//       setState(() {
+//         _isInitialized = true;
+//       });
+//     }
+//   }
+//
+//   void _handleSessionExpired() {
+//     if (_authController != null && _authController!.isAuthenticated) {
+//       _authController!.logout();
+//       _evaluateAppFlow();
+//     }
+//   }
+//
+//   Future<void> _startAutoServer() async {
+//     try {
+//       _autoServer = ApiServer(
+//         dbHelper: DatabaseHelper.instance,
+//         tracker: ConnectionTracker(),
+//         port: NetworkConfig.instance.port,
+//       );
+//       await _autoServer!.start();
+//     } catch (_) {}
+//   }
+//
+//   @override
+//   void dispose() {
+//     WidgetsBinding.instance.removeObserver(this);
+//     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+//       windowManager.removeListener(this);
+//     }
+//     ApiClient.instance.onSessionExpired = null;
+//     _autoServer?.stop();
+//     _authController?.dispose();
+//     DatabaseHelper.instance.close();
+//     super.dispose();
+//   }
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     if (!_isInitialized || _authController == null) {
+//       return MaterialApp(
+//         theme: AppTheme.light,
+//         debugShowCheckedModeBanner: false,
+//         home: Scaffold(
+//           body: Center(
+//             child: _dbError != null
+//                 ? Text(
+//               'Database initialization error:\n$_dbError',
+//               textAlign: TextAlign.center,
+//               style: const TextStyle(color: Colors.red),
+//             )
+//                 : const CircularProgressIndicator(),
+//           ),
+//         ),
+//       );
+//     }
+//
+//     return MaterialApp(
+//       title: 'PharmaSuite ERP',
+//       debugShowCheckedModeBanner: false,
+//       navigatorKey: _navigatorKey,
+//       theme: AppTheme.light,
+//       home: ListenableBuilder(
+//         listenable: _authController!,
+//         builder: (context, _) {
+//           // 1. If user is successfully logged in (and license is valid), show the Main App
+//           if (_authController!.isAuthenticated) {
+//             return ShellScreen(
+//               key: ValueKey(_authController!.currentUser!.id),
+//               authController: _authController!,
+//             );
+//           }
+//
+//           // 2. Otherwise, show the unified Onboarding / Login / Renewal split-screen
+//           return OnboardingScreen(
+//             authController: _authController!,
+//             onLoginSuccess: () {
+//               // The UI will rebuild automatically because authController is a Listenable
+//               // and isAuthenticated is now true.
+//             },
+//           );
+//         },
+//       ),
+//     );
+//   }
+// }
+// lib/app/app.dart
+
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
+
+import '../core/data/database_helper.dart';
+import '../core/network/api_client.dart';
+import '../core/network/api_server.dart';
+import '../core/network/connection_tracker.dart';
+import '../core/network/network_config.dart';
+import '../core/theme/app_theme.dart';
+import '../features/authentication/data/http_auth_repository.dart';
+import '../features/authentication/data/sqlite_auth_repository.dart';
+import '../features/authentication/presentation/controllers/auth_controller.dart';
+import '../features/authentication/presentation/screens/onboarding_screen.dart';
+import '../features/licensing/data/sqlite_license_repository.dart';
+import '../features/licensing/domain/license.dart';
+import '../features/settings/data/sqlite_settings_repository.dart';
+import '../features/shell/presentation/screens/shell_screen.dart';
+
+class PharmacyApp extends StatefulWidget {
+  const PharmacyApp({super.key});
+
+  @override
+  State<PharmacyApp> createState() => _PharmacyAppState();
+}
+
+class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver, WindowListener {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  AuthController? _authController;
+  ApiServer? _autoServer;
+  final _licenseRepo = SqliteLicenseRepository();
+
+  bool _isInitialized = false;
+  String? _dbError;
+  bool _isClosing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.addListener(this);
+    }
+
+    _initApp();
+  }
+
+  @override
+  void onWindowClose() async {
+    if (_isClosing) return;
+    _isClosing = true;
+
+    try {
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        await windowManager.hide();
+      }
+      await DatabaseHelper.createBackup();
+      debugPrint('[Auto-Backup] Close backup completed successfully.');
+    } catch (e) {
+      debugPrint('[Auto-Backup] Close backup error: $e');
+    } finally {
+      try {
+        _autoServer?.stop();
+      } catch (_) {}
+      exit(0);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      DatabaseHelper.createBackup();
+    }
+  }
+
+  Future<void> _initApp() async {
+    try {
+      await DatabaseHelper.instance.database;
+
+      final settingsRepo = SqliteSettingsRepository();
+      final settingsResult = await settingsRepo.getAllSettings();
+      settingsResult.fold(
+        onSuccess: (settings) {
+          final map = {for (final s in settings) s.key: s.value};
+          NetworkConfig.instance.loadFromSettings(map);
+        },
+        onFailure: (_) {},
+      );
+
+      final isClient = NetworkConfig.instance.isClient;
+      final authRepo = isClient
+          ? HttpAuthRepository(api: ApiClient.instance, localFallback: SqliteAuthRepository())
+          : SqliteAuthRepository();
+
+      _authController = AuthController(authRepository: authRepo);
+      ApiClient.instance.onSessionExpired = isClient ? _handleSessionExpired : null;
+
+      if (NetworkConfig.instance.isServer && NetworkConfig.instance.autoStartServer) {
+        _startAutoServer();
+      }
+
+      await DatabaseHelper.createBackup();
+      await _evaluateAppFlow();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _dbError = e.toString();
+        });
+      }
+    }
+  }
+
+  Future<void> _evaluateAppFlow() async {
+    if (_authController!.isAuthenticated) {
+      final licResult = await _licenseRepo.getLicenseInfo();
+      bool isExpired = false;
+
+      licResult.fold(
+        onSuccess: (info) => isExpired = (info.status == LicenseStatus.expired),
+        onFailure: (_) {},
+      );
+
+      if (isExpired) {
+        await _authController!.logout();
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _isInitialized = true;
+      });
+    }
+  }
+
+  void _handleSessionExpired() {
+    if (_authController != null && _authController!.isAuthenticated) {
+      _authController!.logout();
+      _evaluateAppFlow();
+    }
+  }
+
+  Future<void> _startAutoServer() async {
+    try {
+      _autoServer = ApiServer(
+        dbHelper: DatabaseHelper.instance,
+        tracker: ConnectionTracker(),
+        port: NetworkConfig.instance.port,
+      );
+      await _autoServer!.start();
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      windowManager.removeListener(this);
+    }
+    ApiClient.instance.onSessionExpired = null;
+    _autoServer?.stop();
+    _authController?.dispose();
+    DatabaseHelper.instance.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isInitialized || _authController == null) {
+      return MaterialApp(
+        theme: AppTheme.light,
+        debugShowCheckedModeBanner: false,
+        home: Scaffold(
+          body: Center(
+            child: _dbError != null
+                ? Text(
+              'Database initialization error:\n$_dbError',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.red),
+            )
+                : const CircularProgressIndicator(),
+          ),
+        ),
+      );
+    }
+
+    return MaterialApp(
+      title: 'PharmaSuite ERP',
+      debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
+      theme: AppTheme.light,
+      home: ListenableBuilder(
+        listenable: _authController!,
+        builder: (context, _) {
+          if (_authController!.isAuthenticated) {
+            return ShellScreen(
+              key: ValueKey(_authController!.currentUser!.id),
+              authController: _authController!,
+            );
+          }
+
+          return OnboardingScreen(
+            authController: _authController!,
+            onLoginSuccess: () {},
+          );
+        },
+      ),
+    );
+  }
+}
+
+========== FILE: lib/features/suppliers/data/sqlite_supplier_repository.dart ==========
+import 'package:sqflite/sqflite.dart';
+import '../../../core/data/database_helper.dart';
+import '../../../core/error/failures.dart';
+import '../../../core/result/result.dart';
+import '../../medicines/domain/value_objects.dart';
+import '../domain/supplier.dart';
+import '../domain/supplier_ledger.dart';
+import '../domain/supplier_repository.dart';
+
+class SqliteSupplierRepository implements SupplierRepository {
+  final DatabaseHelper _dbHelper;
+
+  SqliteSupplierRepository({DatabaseHelper? dbHelper})
+    : _dbHelper = dbHelper ?? DatabaseHelper.instance;
+
+  Future<Database> get _db => _dbHelper.database;
+
+  Supplier _rowToSupplier(Map<String, dynamic> r) {
+    return Supplier(
+      id: SupplierId(r['id'] as String),
+      name: r['name'] as String,
+      contactPerson: r['contact_person'] as String? ?? '',
+      phone: r['phone'] as String? ?? '',
+      email: r['email'] as String? ?? '',
+      address: r['address'] as String? ?? '',
+      paymentTerms: r['payment_terms'] as String? ?? '',
+      status: SupplierStatus.values.firstWhere(
+        (e) => e.name == r['status'],
+        orElse: () => SupplierStatus.active,
+      ),
+      createdAt: DateTime.parse(r['created_at'] as String),
+      updatedAt: DateTime.parse(r['updated_at'] as String),
+    );
+  }
+
+  Future<Money> _computePayable(Database db, String supplierId) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT COALESCE(SUM(credit), 0) AS total_credit,
+             COALESCE(SUM(debit), 0) AS total_debit
+      FROM supplier_ledger_entries
+      WHERE supplier_id = ?
+    ''',
+      [supplierId],
+    );
+    if (rows.isEmpty) return Money.zero();
+    final credit = (rows.first['total_credit'] as num).toInt();
+    final debit = (rows.first['total_debit'] as num).toInt();
+    // Payable = we owe = credit - debit
+    return Money.fromPaisa(credit - debit);
+  }
+
+  Future<DateTime?> _getLastActivity(Database db, String supplierId) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT MAX(created_at) AS last_at
+      FROM supplier_ledger_entries
+      WHERE supplier_id = ?
+    ''',
+      [supplierId],
+    );
+    if (rows.isEmpty || rows.first['last_at'] == null) return null;
+    return DateTime.parse(rows.first['last_at'] as String);
+  }
+
+  @override
+  Future<Result<List<SupplierWithBalance>>> getSuppliers({
+    String? searchQuery,
+  }) async {
+    try {
+      final db = await _db;
+      String? where;
+      List<dynamic>? args;
+
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        where = 'name LIKE ? OR contact_person LIKE ? OR phone LIKE ?';
+        final q = '%$searchQuery%';
+        args = [q, q, q];
+      }
+
+      final rows = await db.query(
+        'suppliers',
+        where: where,
+        whereArgs: args,
+        orderBy: 'name ASC',
+      );
+
+      final result = <SupplierWithBalance>[];
+      for (final r in rows) {
+        final supplier = _rowToSupplier(r);
+        final payable = await _computePayable(db, supplier.id.value);
+        final lastActivity = await _getLastActivity(db, supplier.id.value);
+        result.add(
+          SupplierWithBalance(
+            supplier: supplier,
+            payable: payable,
+            lastActivityAt: lastActivity,
+          ),
+        );
+      }
+
+      return Success(result);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load suppliers: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Supplier>> getSupplierById(SupplierId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'suppliers',
+        where: 'id = ?',
+        whereArgs: [id.value],
+        limit: 1,
+      );
+      if (rows.isEmpty) {
+        return const Failure(NotFoundFailure(message: 'Supplier not found.'));
+      }
+      return Success(_rowToSupplier(rows.first));
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load supplier: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Supplier?>> findSupplierByName(String name) async {
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'suppliers',
+        where: 'LOWER(name) = ?',
+        whereArgs: [name.toLowerCase()],
+        limit: 1,
+      );
+      if (rows.isEmpty) return const Success(null);
+      return Success(_rowToSupplier(rows.first));
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Supplier lookup failed: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Supplier>> createSupplier(Supplier s) async {
+    try {
+      final db = await _db;
+      await db.insert('suppliers', {
+        'id': s.id.value,
+        'name': s.name,
+        'contact_person': s.contactPerson,
+        'phone': s.phone,
+        'email': s.email,
+        'address': s.address,
+        'payment_terms': s.paymentTerms,
+        'status': s.status.name,
+        'created_at': s.createdAt.toIso8601String(),
+        'updated_at': s.updatedAt.toIso8601String(),
+      });
+      return Success(s);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to save supplier: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Supplier>> updateSupplier(Supplier s) async {
+    try {
+      final db = await _db;
+      final rows = await db.update(
+        'suppliers',
+        {
+          'name': s.name,
+          'contact_person': s.contactPerson,
+          'phone': s.phone,
+          'email': s.email,
+          'address': s.address,
+          'payment_terms': s.paymentTerms,
+          'status': s.status.name,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [s.id.value],
+      );
+      if (rows == 0)
+        return const Failure(NotFoundFailure(message: 'Supplier not found.'));
+      return Success(s);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to update supplier: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> deleteSupplier(SupplierId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.delete(
+        'suppliers',
+        where: 'id = ?',
+        whereArgs: [id.value],
+      );
+      if (rows == 0)
+        return const Failure(NotFoundFailure(message: 'Supplier not found.'));
+      return const Success(null);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to delete supplier: $e'));
+    }
+  }
+
+  @override
+  Future<Result<List<SupplierLedgerRow>>> getLedger(SupplierId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'supplier_ledger_entries',
+        where: 'supplier_id = ?',
+        whereArgs: [id.value],
+        orderBy: 'created_at ASC',
+      );
+
+      int running = 0;
+      final result = <SupplierLedgerRow>[];
+
+      for (final r in rows) {
+        final debit = r['debit'] as int;
+        final credit = r['credit'] as int;
+        // For suppliers, payable = credit - debit
+        running += (credit - debit);
+
+        final entry = SupplierLedgerEntry(
+          id: r['id'] as String,
+          supplierId: id,
+          entryType: SupplierEntryType.values.firstWhere(
+            (e) => e.name == r['entry_type'],
+            orElse: () => SupplierEntryType.adjustment,
+          ),
+          description: r['description'] as String,
+          reference: r['reference'] as String?,
+          debit: Money.fromPaisa(debit),
+          credit: Money.fromPaisa(credit),
+          paymentMethod: r['payment_method'] as String?,
+          operatorName: r['operator_name'] as String,
+          createdAt: DateTime.parse(r['created_at'] as String),
+        );
+
+        result.add(
+          SupplierLedgerRow(
+            entry: entry,
+            runningBalance: Money.fromPaisa(running),
+          ),
+        );
+      }
+
+      return Success(result.reversed.toList());
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load ledger: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Money>> getPayableBalance(SupplierId id) async {
+    try {
+      final db = await _db;
+      return Success(await _computePayable(db, id.value));
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to compute payable: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> addLedgerEntry(SupplierLedgerEntry entry) async {
+    try {
+      final db = await _db;
+      await db.insert('supplier_ledger_entries', {
+        'id': entry.id,
+        'supplier_id': entry.supplierId.value,
+        'entry_type': entry.entryType.name,
+        'description': entry.description,
+        'reference': entry.reference,
+        'debit': entry.debit.paisa,
+        'credit': entry.credit.paisa,
+        'payment_method': entry.paymentMethod,
+        'operator_name': entry.operatorName,
+        'created_at': entry.createdAt.toIso8601String(),
+      });
+      return const Success(null);
+    } catch (e) {
+      return Failure(
+        DatabaseFailure(message: 'Failed to record ledger entry: $e'),
+      );
+    }
+  }
+}
+

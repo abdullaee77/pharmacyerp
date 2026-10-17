@@ -187,6 +187,8 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     _customerController = CustomerController(repository: customerRepo);
     _supplierController = SupplierController(repository: supplierRepo);
     _accountController = AccountController(repository: accountRepo);
+    _accountController.loadAccounts(); // Load accounts immediately at launch
+
     _expenseController = ExpenseController(
       expenseRepository: expenseRepo,
       accountRepository: accountRepo,
@@ -194,7 +196,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     _reportController = ReportController(repository: reportRepo);
     _userController = UserController(repository: userRepo);
     _settingsController = SettingsController(repository: settingsRepo);
-    _settingsController.loadSettings(); // Loads store info & logo for TopBar
+    _settingsController.loadSettings();
     _licenseController = LicenseController(repository: MockLicenseRepository());
     _backupController = BackupController();
     _backupController.onDataRestored = _reloadAllData;
@@ -202,6 +204,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
 
     _adminSections =
         AdminSection.values.where((s) => s.isAllowedFor(user)).toList();
+
     _salesTabs = [
       if (_can(PermissionCategory.sales, PermissionAction.add))
         _SubTab(
@@ -210,6 +213,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
             controller: _posCartController,
             salesController: _salesController,
             authController: widget.authController,
+            accountController: _accountController, // Passed account controller
           ),
         ),
       if (_can(PermissionCategory.sales, PermissionAction.view))
@@ -250,6 +254,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
           controller: _purchaseController,
           batchController: _batchController,
           authController: widget.authController,
+          accountController: _accountController, // Passed account controller
         ),
       ),
       _gatedPage(NavigationItem.inventory, _buildInventoryPage),
@@ -391,9 +396,9 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     if (NavigationItem.suppliers.isAllowedFor(user)) {
       _supplierController.loadSuppliers(silent: true);
     }
-    if (NavigationItem.accounts.isAllowedFor(user)) {
-      _accountController.loadAccounts(silent: true);
-    }
+
+    _accountController.loadAccounts(silent: true); // Always keep accounts fresh
+
     if (NavigationItem.reports.isAllowedFor(user)) {
       _reportController.generateReport(silent: true);
     }
@@ -409,7 +414,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     if (AdminSection.roles.isAllowedFor(user)) {
       _userController.loadRoles(silent: true);
     }
-    _settingsController.loadSettings(); // Refreshes top bar store info
+    _settingsController.loadSettings();
   }
 
   Widget _wrap(Widget child) {

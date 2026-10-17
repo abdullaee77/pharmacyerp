@@ -1,6 +1,9 @@
+// lib/features/expenses/presentation/widgets/expense_form_dialog.dart
+
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/theme/app_radius.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
 import '../../../accounts/domain/account.dart';
@@ -37,11 +40,62 @@ class _ExpenseFormDialogState extends State<ExpenseFormDialog> {
   bool _isSaving = false;
 
   @override
+  void initState() {
+    super.initState();
+    _syncAccountWithMethod(_method);
+  }
+
+  @override
   void dispose() {
     _descCtrl.dispose();
     _amountCtrl.dispose();
     _refCtrl.dispose();
     super.dispose();
+  }
+
+  /// Automatically matches and selects the account when payment method changes
+  void _onMethodSelected(String method) {
+    setState(() {
+      _method = method;
+      _syncAccountWithMethod(method);
+    });
+  }
+
+  void _syncAccountWithMethod(String method) {
+    if (widget.accounts.isEmpty) {
+      _accountId = null;
+      return;
+    }
+
+    if (method == 'Cash') {
+      final cashAccounts = widget.accounts.where((a) => a.account.accountType == AccountType.cash);
+      if (cashAccounts.isNotEmpty) {
+        _accountId = cashAccounts.first.account.id.value;
+      } else {
+        _accountId = widget.accounts.first.account.id.value;
+      }
+    } else if (method == 'Card' || method == 'Bank') {
+      final bankAccounts = widget.accounts.where((a) => a.account.accountType == AccountType.bank);
+      if (bankAccounts.isNotEmpty) {
+        _accountId = bankAccounts.first.account.id.value;
+      } else {
+        _accountId = widget.accounts.first.account.id.value;
+      }
+    } else {
+      _accountId = widget.accounts.first.account.id.value;
+    }
+  }
+
+  /// Filter accounts shown in dropdown based on payment method
+  List<AccountWithBalance> get _filteredAccounts {
+    if (_method == 'Cash') {
+      final cashOnly = widget.accounts.where((a) => a.account.accountType == AccountType.cash).toList();
+      return cashOnly.isNotEmpty ? cashOnly : widget.accounts;
+    } else if (_method == 'Card' || _method == 'Bank') {
+      final bankOnly = widget.accounts.where((a) => a.account.accountType == AccountType.bank).toList();
+      return bankOnly.isNotEmpty ? bankOnly : widget.accounts;
+    }
+    return widget.accounts;
   }
 
   Future<void> _pickDate() async {
@@ -128,10 +182,10 @@ class _ExpenseFormDialogState extends State<ExpenseFormDialog> {
                             items: cats
                                 .map(
                                   (c) => DropdownMenuItem(
-                                    value: c.name,
-                                    child: Text(c.name),
-                                  ),
-                                )
+                                value: c.name,
+                                child: Text(c.name),
+                              ),
+                            )
                                 .toList(),
                             onChanged: (v) => setState(() => _category = v),
                             validator: (v) => v == null ? 'Required' : null,
@@ -148,7 +202,7 @@ class _ExpenseFormDialogState extends State<ExpenseFormDialog> {
                               decimal: true,
                             ),
                             validator: (v) =>
-                                v == null || double.tryParse(v) == null
+                            v == null || double.tryParse(v) == null
                                 ? 'Required'
                                 : null,
                           ),
@@ -162,7 +216,7 @@ class _ExpenseFormDialogState extends State<ExpenseFormDialog> {
                       prefixIcon: Icons.description_outlined,
                       isRequired: true,
                       validator: (v) =>
-                          v == null || v.trim().isEmpty ? 'Required' : null,
+                      v == null || v.trim().isEmpty ? 'Required' : null,
                     ),
                     const SizedBox(height: AppSpacing.md),
                     Row(
@@ -177,8 +231,8 @@ class _ExpenseFormDialogState extends State<ExpenseFormDialog> {
                               ),
                               child: Text(
                                 '${_date.day.toString().padLeft(2, '0')}/'
-                                '${_date.month.toString().padLeft(2, '0')}/'
-                                '${_date.year}',
+                                    '${_date.month.toString().padLeft(2, '0')}/'
+                                    '${_date.year}',
                               ),
                             ),
                           ),
@@ -189,42 +243,48 @@ class _ExpenseFormDialogState extends State<ExpenseFormDialog> {
                             value: _method,
                             decoration: const InputDecoration(
                               labelText: 'Payment Method',
+                              prefixIcon: Icon(Icons.payment_rounded),
                             ),
                             items: const ['Cash', 'Card', 'Bank', 'Other']
                                 .map(
                                   (m) => DropdownMenuItem(
-                                    value: m,
-                                    child: Text(m),
-                                  ),
-                                )
+                                value: m,
+                                child: Text(m),
+                              ),
+                            )
                                 .toList(),
-                            onChanged: (v) =>
-                                setState(() => _method = v ?? 'Cash'),
+                            onChanged: (v) {
+                              if (v != null) _onMethodSelected(v);
+                            },
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: AppSpacing.md),
-                    DropdownButtonFormField<String?>(
-                      value: _accountId,
-                      decoration: const InputDecoration(
-                        labelText: 'Account (optional)',
-                        prefixIcon: Icon(Icons.account_balance_outlined),
-                      ),
-                      items: [
-                        const DropdownMenuItem(
-                          value: null,
-                          child: Text('— None —'),
+
+                    // Dynamically filtered Account Dropdown
+                    if (widget.accounts.isNotEmpty)
+                      DropdownButtonFormField<String?>(
+                        value: _accountId,
+                        decoration: const InputDecoration(
+                          labelText: 'Payment Account',
+                          prefixIcon: Icon(Icons.account_balance_outlined),
                         ),
-                        ...widget.accounts.map(
-                          (awb) => DropdownMenuItem(
-                            value: awb.account.id.value,
-                            child: Text(awb.account.name),
+                        items: [
+                          const DropdownMenuItem(
+                            value: null,
+                            child: Text('— None —'),
                           ),
-                        ),
-                      ],
-                      onChanged: (v) => setState(() => _accountId = v),
-                    ),
+                          ..._filteredAccounts.map(
+                                (awb) => DropdownMenuItem(
+                              value: awb.account.id.value,
+                              child: Text(awb.account.name),
+                            ),
+                          ),
+                        ],
+                        onChanged: (v) => setState(() => _accountId = v),
+                      ),
+
                     const SizedBox(height: AppSpacing.md),
                     AppTextField(
                       controller: _refCtrl,

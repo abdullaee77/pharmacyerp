@@ -1,0 +1,1433 @@
+========== FILE: lib/features/shell/presentation/screens/shell_screen.dart ==========
+// lib/features/shell/presentation/screens/shell_screen.dart
+
+import 'dart:async';
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/theme/app_typography.dart';
+import '../../../../core/widgets/app_shortcut_scope.dart';
+import '../../../../core/widgets/app_responsive_layout.dart';
+import '../../../../core/widgets/permission_gate.dart';
+import '../../../../core/network/network_config.dart';
+import '../../../../core/network/data_sync_service.dart';
+import '../../../../core/network/api_server.dart';
+import '../../../accounts/data/sqlite_account_repository.dart';
+import '../../../accounts/data/http_account_repository.dart';
+import '../../../accounts/presentation/controllers/account_controller.dart';
+import '../../../accounts/presentation/screens/accounts_screen.dart';
+import '../../../authentication/domain/user.dart';
+import '../../../authentication/presentation/controllers/auth_controller.dart';
+import '../../../backup/presentation/controllers/backup_controller.dart';
+import '../../../backup/presentation/screens/backup_screen.dart';
+import '../../../categories/data/sqlite_category_repository.dart';
+import '../../../categories/data/http_category_repository.dart';
+import '../../../categories/presentation/controllers/category_controller.dart';
+import '../../../categories/presentation/screens/categories_screen.dart';
+import '../../../customers/data/sqlite_customer_repository.dart';
+import '../../../customers/data/http_customer_repository.dart';
+import '../../../customers/presentation/controllers/customer_controller.dart';
+import '../../../customers/presentation/screens/customer_list_screen.dart';
+import '../../../expenses/data/sqlite_expense_repository.dart';
+import '../../../expenses/data/http_expense_repository.dart';
+import '../../../expenses/presentation/controllers/expense_controller.dart';
+import '../../../expenses/presentation/screens/expenses_screen.dart';
+import '../../../inventory/data/sqlite_inventory_repository.dart';
+import '../../../inventory/data/http_inventory_repository.dart';
+import '../../../inventory/data/sqlite_batch_repository.dart';
+import '../../../inventory/data/http_batch_repository.dart';
+import '../../../inventory/presentation/controllers/inventory_controller.dart';
+import '../../../inventory/presentation/controllers/batch_controller.dart';
+import '../../../inventory/presentation/screens/inventory_dashboard_screen.dart';
+import '../../../inventory/presentation/screens/inventory_list_screen.dart';
+import '../../../inventory/presentation/screens/batch_list_screen.dart';
+import '../../../licensing/data/mock_license_repository.dart';
+import '../../../licensing/presentation/controllers/license_controller.dart';
+import '../../../licensing/presentation/screens/license_screen.dart';
+import '../../../medicines/data/sqlite_medicine_repository.dart';
+import '../../../medicines/data/http_medicine_repository.dart';
+import '../../../medicines/presentation/controllers/medicine_controller.dart';
+import '../../../medicines/presentation/screens/medicine_list_screen.dart';
+import '../../../network/presentation/controllers/network_controller.dart';
+import '../../../network/presentation/screens/network_settings_screen.dart';
+import '../../../purchases/data/sqlite_purchase_repository.dart';
+import '../../../purchases/data/http_purchase_repository.dart';
+import '../../../purchases/presentation/controllers/purchase_controller.dart';
+import '../../../purchases/presentation/screens/purchase_workspace_screen.dart';
+import '../../../reports/data/sqlite_report_repository.dart';
+import '../../../reports/data/http_report_repository.dart';
+import '../../../reports/presentation/controllers/report_controller.dart';
+import '../../../reports/presentation/screens/reports_screen.dart';
+import '../../../reports/presentation/screens/business_dashboard_screen.dart';
+import '../../../sales/data/sqlite_pos_repository.dart';
+import '../../../sales/data/sqlite_sales_repository.dart';
+import '../../../sales/data/http_pos_repository.dart';
+import '../../../sales/data/http_sales_repository.dart';
+import '../../../sales/presentation/controllers/pos_cart_controller.dart';
+import '../../../sales/presentation/controllers/sales_controller.dart';
+import '../../../sales/presentation/screens/pos_screen.dart';
+import '../../../sales/presentation/screens/sales_history_screen.dart';
+import '../../../settings/data/sqlite_settings_repository.dart';
+import '../../../settings/presentation/controllers/settings_controller.dart';
+import '../../../settings/presentation/screens/settings_screen.dart';
+import '../../../suppliers/data/sqlite_supplier_repository.dart';
+import '../../../suppliers/data/http_supplier_repository.dart';
+import '../../../suppliers/presentation/controllers/supplier_controller.dart';
+import '../../../suppliers/presentation/screens/supplier_list_screen.dart';
+import '../../../users/data/sqlite_user_repository.dart';
+import '../../../users/data/http_user_repository.dart';
+import '../../../users/domain/role.dart';
+import '../../../users/presentation/controllers/user_controller.dart';
+import '../../../users/presentation/screens/users_screen.dart';
+import '../../../users/presentation/screens/roles_screen.dart';
+import '../../domain/navigation_item.dart';
+import '../controllers/shell_controller.dart';
+import '../controllers/workspace_controller.dart';
+import '../widgets/top_bar.dart';
+import '../widgets/top_nav_bar.dart';
+import '../widgets/global_search_dialog.dart';
+
+class _SubTab {
+  final String label;
+  final Widget Function() build;
+  _SubTab(this.label, this.build);
+}
+
+class ShellScreen extends StatefulWidget {
+  final AuthController authController;
+  const ShellScreen({super.key, required this.authController});
+
+  @override
+  State<ShellScreen> createState() => _ShellScreenState();
+}
+
+class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin {
+  late final ShellController _navController;
+  late final WorkspaceController _workspaceController;
+  late final MedicineController _medicineController;
+  late final InventoryController _inventoryController;
+  late final BatchController _batchController;
+  late final CategoryController _categoryController;
+  late final PosCartController _posCartController;
+  late final SalesController _salesController;
+  late final PurchaseController _purchaseController;
+  late final CustomerController _customerController;
+  late final SupplierController _supplierController;
+  late final AccountController _accountController;
+  late final ExpenseController _expenseController;
+  late final ReportController _reportController;
+  late final UserController _userController;
+  late final SettingsController _settingsController;
+  late final LicenseController _licenseController;
+  late final BackupController _backupController;
+  late final NetworkController _networkController;
+
+  late final TabController _inventoryTabCtrl;
+  late final TabController _salesTabCtrl;
+  late final TabController _adminTabCtrl;
+
+  late final List<Widget> _pages;
+
+  Timer? _reloadDebounce;
+
+  late final bool _hasAccess;
+  late final List<AdminSection> _adminSections;
+  late final List<_SubTab> _salesTabs;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final user = widget.authController.currentUser;
+    final allowed =
+    NavigationItem.values.where((i) => i.isAllowedFor(user)).toList();
+    _hasAccess = allowed.isNotEmpty;
+
+    _navController = ShellController(
+      initialItem: _hasAccess ? allowed.first : NavigationItem.home,
+    );
+    _navController.addListener(_onNavChange);
+    _workspaceController = WorkspaceController();
+    _workspaceController.addListener(_onWorkspaceChange);
+
+    final isClient = NetworkConfig.instance.isClient;
+
+    final medicineRepo = isClient ? HttpMedicineRepository() : SqliteMedicineRepository();
+    final inventoryRepo = isClient ? HttpInventoryRepository() : SqliteInventoryRepository();
+    final customerRepo = isClient ? HttpCustomerRepository() : SqliteCustomerRepository();
+    final batchRepo = isClient ? HttpBatchRepository() : SqliteBatchRepository();
+    final salesRepo = isClient ? HttpSalesRepository() : SqliteSalesRepository();
+    final posRepo = isClient ? HttpPosRepository(batchRepo: batchRepo) : SqlitePosRepository();
+    final purchaseRepo = isClient ? HttpPurchaseRepository() : SqlitePurchaseRepository();
+    final supplierRepo = isClient ? HttpSupplierRepository() : SqliteSupplierRepository();
+    final categoryRepo = isClient ? HttpCategoryRepository() : SqliteCategoryRepository();
+    final reportRepo = isClient ? HttpReportRepository() : SqliteReportRepository();
+    final accountRepo = isClient ? HttpAccountRepository() : SqliteAccountRepository();
+    final expenseRepo = isClient ? HttpExpenseRepository() : SqliteExpenseRepository();
+    final userRepo = isClient ? HttpUserRepository() : SqliteUserRepository();
+
+    final settingsRepo = SqliteSettingsRepository();
+
+    _medicineController = MedicineController(repository: medicineRepo);
+    _inventoryController = InventoryController(repository: inventoryRepo);
+    _batchController = BatchController(repository: batchRepo);
+    _categoryController = CategoryController(repository: categoryRepo);
+    _posCartController = PosCartController(repository: posRepo);
+    _salesController = SalesController(
+      salesRepository: salesRepo,
+      inventoryRepository: inventoryRepo,
+      customerRepository: customerRepo,
+    );
+    _purchaseController = PurchaseController(
+      purchaseRepository: purchaseRepo,
+      inventoryRepository: inventoryRepo,
+      batchRepository: batchRepo,
+      supplierRepository: supplierRepo,
+    );
+    _customerController = CustomerController(repository: customerRepo);
+    _supplierController = SupplierController(repository: supplierRepo);
+    _accountController = AccountController(repository: accountRepo);
+    _expenseController = ExpenseController(
+      expenseRepository: expenseRepo,
+      accountRepository: accountRepo,
+    );
+    _reportController = ReportController(repository: reportRepo);
+    _userController = UserController(repository: userRepo);
+    _settingsController = SettingsController(repository: settingsRepo);
+    _settingsController.loadSettings(); // Loads store info & logo for TopBar
+    _licenseController = LicenseController(repository: MockLicenseRepository());
+    _backupController = BackupController();
+    _backupController.onDataRestored = _reloadAllData;
+    _networkController = NetworkController(settingsRepo: settingsRepo);
+
+    _adminSections =
+        AdminSection.values.where((s) => s.isAllowedFor(user)).toList();
+    _salesTabs = [
+      if (_can(PermissionCategory.sales, PermissionAction.add))
+        _SubTab(
+          'Point of Sale (POS)',
+              () => PosScreen(
+            controller: _posCartController,
+            salesController: _salesController,
+            authController: widget.authController,
+          ),
+        ),
+      if (_can(PermissionCategory.sales, PermissionAction.view))
+        _SubTab(
+          'Sales History & Returns',
+              () => SalesHistoryScreen(
+            controller: _salesController,
+            authController: widget.authController,
+          ),
+        ),
+    ];
+
+    _inventoryTabCtrl = TabController(length: 3, vsync: this);
+    _salesTabCtrl =
+        TabController(length: math.max(1, _salesTabs.length), vsync: this);
+    _adminTabCtrl =
+        TabController(length: math.max(1, _adminSections.length), vsync: this);
+
+    _pages = [
+      _gatedPage(
+        NavigationItem.home,
+            () => BusinessDashboardScreen(
+          controller: _reportController,
+          onNavigateToTab: (int index) {
+            _navigateToIndex(index);
+            if (index == 3) {
+              _inventoryTabCtrl.animateTo(1);
+            } else if (index == 1 && _salesTabs.isNotEmpty) {
+              _salesTabCtrl.animateTo(0);
+            }
+          },
+        ),
+      ),
+      _gatedPage(NavigationItem.sales, _buildSalesPage),
+      _gatedPage(
+        NavigationItem.purchases,
+            () => PurchaseWorkspaceScreen(
+          controller: _purchaseController,
+          batchController: _batchController,
+          authController: widget.authController,
+        ),
+      ),
+      _gatedPage(NavigationItem.inventory, _buildInventoryPage),
+      _gatedPage(
+        NavigationItem.medicines,
+            () => MedicineListScreen(
+          controller: _medicineController,
+          authController: widget.authController,
+        ),
+      ),
+      _gatedPage(
+        NavigationItem.customers,
+            () => CustomerListScreen(
+          controller: _customerController,
+          authController: widget.authController,
+        ),
+      ),
+      _gatedPage(
+        NavigationItem.suppliers,
+            () => SupplierListScreen(
+          controller: _supplierController,
+          authController: widget.authController,
+        ),
+      ),
+      _gatedPage(
+        NavigationItem.accounts,
+            () => AccountsScreen(
+          controller: _accountController,
+          authController: widget.authController,
+        ),
+      ),
+      _gatedPage(
+        NavigationItem.reports,
+            () => ReportsScreen(controller: _reportController),
+      ),
+      _gatedPage(NavigationItem.settings, _buildSettingsPage),
+    ];
+
+    if (isClient) {
+      DataSyncService.instance.addListener(_onRemoteDataChanged);
+      DataSyncService.instance.start(interval: const Duration(seconds: 2));
+    } else {
+      ApiServer.onServerDataChanged.addListener(_onRemoteDataChanged);
+    }
+  }
+
+  bool _can(PermissionCategory c, PermissionAction a) =>
+      widget.authController.currentUser?.can(c, a) ?? false;
+
+  VoidCallback? _gatedCallback(
+      PermissionCategory c, PermissionAction a, VoidCallback cb) {
+    return _can(c, a) ? cb : null;
+  }
+
+  Widget _gatedPage(NavigationItem item, Widget Function() build) {
+    return item.isAllowedFor(widget.authController.currentUser)
+        ? _wrap(build())
+        : const SizedBox.shrink();
+  }
+
+  Widget _noAccess() => const Center(
+    child: Text('You do not have permission to view this section.'),
+  );
+
+  Widget _adminSectionWidget(AdminSection s) {
+    switch (s) {
+      case AdminSection.expenses:
+        return ExpensesScreen(
+          controller: _expenseController,
+          accountController: _accountController,
+          authController: widget.authController,
+        );
+      case AdminSection.categories:
+        return CategoriesScreen(
+          controller: _categoryController,
+          authController: widget.authController,
+        );
+      case AdminSection.users:
+        return UsersScreen(
+          controller: _userController,
+          authController: widget.authController,
+        );
+      case AdminSection.roles:
+        return RolesScreen(
+          controller: _userController,
+          authController: widget.authController,
+        );
+      case AdminSection.store:
+        return SettingsScreen(
+          mode: SettingsMode.store,
+          controller: _settingsController,
+          authController: widget.authController,
+        );
+      case AdminSection.printer:
+        return SettingsScreen(
+          mode: SettingsMode.printer,
+          controller: _settingsController,
+          authController: widget.authController,
+        );
+      case AdminSection.network:
+        return NetworkSettingsScreen(controller: _networkController);
+      case AdminSection.backup:
+        return BackupScreen(controller: _backupController);
+      case AdminSection.license:
+        return LicenseScreen(controller: _licenseController);
+    }
+  }
+
+  void _onRemoteDataChanged() {
+    _reloadDebounce?.cancel();
+    _reloadDebounce = Timer(const Duration(milliseconds: 150), () {
+      if (mounted) _reloadAllData();
+    });
+  }
+
+  Future<void> _reloadAllData() async {
+    final user = widget.authController.currentUser;
+    if (user == null) return;
+
+    if (NavigationItem.home.isAllowedFor(user)) {
+      _reportController.loadMetrics(silent: true);
+    }
+    if (NavigationItem.sales.isAllowedFor(user)) {
+      _salesController.loadHistory(silent: true);
+    }
+    if (NavigationItem.purchases.isAllowedFor(user)) {
+      _purchaseController.loadPurchases(silent: true);
+    }
+    if (NavigationItem.inventory.isAllowedFor(user)) {
+      _inventoryController.loadStockLevels(silent: true);
+      _batchController.loadBatches(silent: true);
+    }
+    if (NavigationItem.medicines.isAllowedFor(user)) {
+      _medicineController.loadMedicines(silent: true);
+    }
+    if (NavigationItem.customers.isAllowedFor(user)) {
+      _customerController.loadCustomers(silent: true);
+    }
+    if (NavigationItem.suppliers.isAllowedFor(user)) {
+      _supplierController.loadSuppliers(silent: true);
+    }
+    if (NavigationItem.accounts.isAllowedFor(user)) {
+      _accountController.loadAccounts(silent: true);
+    }
+    if (NavigationItem.reports.isAllowedFor(user)) {
+      _reportController.generateReport(silent: true);
+    }
+    if (AdminSection.expenses.isAllowedFor(user)) {
+      _expenseController.loadAll(silent: true);
+    }
+    if (AdminSection.categories.isAllowedFor(user)) {
+      _categoryController.loadAll(silent: true);
+    }
+    if (AdminSection.users.isAllowedFor(user)) {
+      _userController.loadUsers(silent: true);
+    }
+    if (AdminSection.roles.isAllowedFor(user)) {
+      _userController.loadRoles(silent: true);
+    }
+    _settingsController.loadSettings(); // Refreshes top bar store info
+  }
+
+  Widget _wrap(Widget child) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.pagePadding),
+      child: child,
+    );
+  }
+
+  Widget _buildSalesPage() {
+    if (_salesTabs.isEmpty) return _noAccess();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TabBar(
+          controller: _salesTabCtrl,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          tabs: [for (final t in _salesTabs) Tab(text: t.label)],
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Expanded(
+          child: TabBarView(
+            controller: _salesTabCtrl,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [for (final t in _salesTabs) t.build()],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInventoryPage() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TabBar(
+          controller: _inventoryTabCtrl,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          tabs: const [
+            Tab(text: 'Overview'),
+            Tab(text: 'Live Stock'),
+            Tab(text: 'Batches'),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Expanded(
+          child: TabBarView(
+            controller: _inventoryTabCtrl,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              InventoryDashboardScreen(
+                inventoryController: _inventoryController,
+                batchController: _batchController,
+              ),
+              InventoryListScreen(
+                controller: _inventoryController,
+                authController: widget.authController,
+              ),
+              BatchListScreen(
+                controller: _batchController,
+                authController: widget.authController,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSettingsPage() {
+    if (_adminSections.isEmpty) return _noAccess();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          const Icon(Icons.settings_rounded, color: AppColors.primary, size: 28),
+          const SizedBox(width: AppSpacing.md),
+          Text('Administration & Settings', style: AppTypography.pageTitle),
+        ]),
+        const SizedBox(height: AppSpacing.lg),
+        TabBar(
+          controller: _adminTabCtrl,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          tabs: [for (final s in _adminSections) Tab(text: s.label)],
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Expanded(
+          child: TabBarView(
+            controller: _adminTabCtrl,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [for (final s in _adminSections) _adminSectionWidget(s)],
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _onNavChange() {
+    _workspaceController.setActiveContext(_navController.selectedItem.name);
+    setState(() {});
+  }
+
+  void _onWorkspaceChange() => setState(() {});
+
+  @override
+  void dispose() {
+    _reloadDebounce?.cancel();
+    if (NetworkConfig.instance.isClient) {
+      DataSyncService.instance.removeListener(_onRemoteDataChanged);
+      DataSyncService.instance.stop();
+    } else {
+      ApiServer.onServerDataChanged.removeListener(_onRemoteDataChanged);
+    }
+
+    _navController.removeListener(_onNavChange);
+    _navController.dispose();
+    _workspaceController.removeListener(_onWorkspaceChange);
+    _workspaceController.dispose();
+    _inventoryTabCtrl.dispose();
+    _salesTabCtrl.dispose();
+    _adminTabCtrl.dispose();
+    _medicineController.dispose();
+    _inventoryController.dispose();
+    _batchController.dispose();
+    _categoryController.dispose();
+    _posCartController.dispose();
+    _salesController.dispose();
+    _purchaseController.dispose();
+    _customerController.dispose();
+    _supplierController.dispose();
+    _accountController.dispose();
+    _expenseController.dispose();
+    _reportController.dispose();
+    _userController.dispose();
+    _settingsController.dispose();
+    _licenseController.dispose();
+    _backupController.dispose();
+    _networkController.dispose();
+    super.dispose();
+  }
+
+  void _navigateToIndex(int index) {
+    final navValues = NavigationItem.values;
+    final user = widget.authController.currentUser;
+
+    if (index >= 0 && index < navValues.length) {
+      final item = navValues[index];
+      if (item.isAllowedFor(user)) {
+        _navController.selectItem(item);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Access Denied: You do not have permission to view this section.'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  void _openSearchDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => GlobalSearchDialog(
+        user: widget.authController.currentUser,
+        onSelectTab: _navigateToIndex,
+      ),
+    );
+  }
+
+  void _handleDismiss() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_hasAccess) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Your role has no permissions assigned. Contact an administrator.'),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: widget.authController.logout,
+                child: const Text('Log out'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final selected = _navController.selectedItem;
+    final selectedIndex = selected.index;
+
+    return AppShortcutScope(
+      onQuickSearch: _openSearchDialog,
+      onToggleFullscreen: () {},
+      onDismiss: _handleDismiss,
+      onNewSale: _gatedCallback(
+        PermissionCategory.sales,
+        PermissionAction.add,
+            () {
+          _navigateToIndex(1);
+          if (_salesTabs.isNotEmpty) _salesTabCtrl.animateTo(0);
+        },
+      ),
+      onNewPurchase: _gatedCallback(
+        PermissionCategory.purchases,
+        PermissionAction.add,
+            () => _navigateToIndex(2),
+      ),
+      onNewMedicine: _gatedCallback(
+        PermissionCategory.medicines,
+        PermissionAction.add,
+            () => _navigateToIndex(4),
+      ),
+      onRefreshData: _reloadAllData,
+      onNavigateToTab: _navigateToIndex,
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: AppResponsiveLayout(
+          builder: (context, breakpoint, constraints) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _workspaceController.updateBreakpoint(breakpoint);
+            });
+
+            return Column(
+              children: [
+                TopBar(
+                  onSearchTap: _openSearchDialog,
+                  authController: widget.authController,
+                  settingsController: _settingsController,
+                ),
+                TopNavBar(
+                  selectedItem: selected,
+                  onItemSelected: _navigateToIndex,
+                  user: widget.authController.currentUser,
+                ),
+                Expanded(
+                  child: IndexedStack(
+                    index: selectedIndex,
+                    sizing: StackFit.expand,
+                    children: _pages,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+========== FILE: lib/features/suppliers/data/sqlite_supplier_repository.dart ==========
+import 'package:sqflite/sqflite.dart';
+import '../../../core/data/database_helper.dart';
+import '../../../core/error/failures.dart';
+import '../../../core/result/result.dart';
+import '../../medicines/domain/value_objects.dart';
+import '../domain/supplier.dart';
+import '../domain/supplier_ledger.dart';
+import '../domain/supplier_repository.dart';
+
+class SqliteSupplierRepository implements SupplierRepository {
+  final DatabaseHelper _dbHelper;
+
+  SqliteSupplierRepository({DatabaseHelper? dbHelper})
+    : _dbHelper = dbHelper ?? DatabaseHelper.instance;
+
+  Future<Database> get _db => _dbHelper.database;
+
+  Supplier _rowToSupplier(Map<String, dynamic> r) {
+    return Supplier(
+      id: SupplierId(r['id'] as String),
+      name: r['name'] as String,
+      contactPerson: r['contact_person'] as String? ?? '',
+      phone: r['phone'] as String? ?? '',
+      email: r['email'] as String? ?? '',
+      address: r['address'] as String? ?? '',
+      paymentTerms: r['payment_terms'] as String? ?? '',
+      status: SupplierStatus.values.firstWhere(
+        (e) => e.name == r['status'],
+        orElse: () => SupplierStatus.active,
+      ),
+      createdAt: DateTime.parse(r['created_at'] as String),
+      updatedAt: DateTime.parse(r['updated_at'] as String),
+    );
+  }
+
+  Future<Money> _computePayable(Database db, String supplierId) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT COALESCE(SUM(credit), 0) AS total_credit,
+             COALESCE(SUM(debit), 0) AS total_debit
+      FROM supplier_ledger_entries
+      WHERE supplier_id = ?
+    ''',
+      [supplierId],
+    );
+    if (rows.isEmpty) return Money.zero();
+    final credit = (rows.first['total_credit'] as num).toInt();
+    final debit = (rows.first['total_debit'] as num).toInt();
+    // Payable = we owe = credit - debit
+    return Money.fromPaisa(credit - debit);
+  }
+
+  Future<DateTime?> _getLastActivity(Database db, String supplierId) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT MAX(created_at) AS last_at
+      FROM supplier_ledger_entries
+      WHERE supplier_id = ?
+    ''',
+      [supplierId],
+    );
+    if (rows.isEmpty || rows.first['last_at'] == null) return null;
+    return DateTime.parse(rows.first['last_at'] as String);
+  }
+
+  @override
+  Future<Result<List<SupplierWithBalance>>> getSuppliers({
+    String? searchQuery,
+  }) async {
+    try {
+      final db = await _db;
+      String? where;
+      List<dynamic>? args;
+
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        where = 'name LIKE ? OR contact_person LIKE ? OR phone LIKE ?';
+        final q = '%$searchQuery%';
+        args = [q, q, q];
+      }
+
+      final rows = await db.query(
+        'suppliers',
+        where: where,
+        whereArgs: args,
+        orderBy: 'name ASC',
+      );
+
+      final result = <SupplierWithBalance>[];
+      for (final r in rows) {
+        final supplier = _rowToSupplier(r);
+        final payable = await _computePayable(db, supplier.id.value);
+        final lastActivity = await _getLastActivity(db, supplier.id.value);
+        result.add(
+          SupplierWithBalance(
+            supplier: supplier,
+            payable: payable,
+            lastActivityAt: lastActivity,
+          ),
+        );
+      }
+
+      return Success(result);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load suppliers: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Supplier>> getSupplierById(SupplierId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'suppliers',
+        where: 'id = ?',
+        whereArgs: [id.value],
+        limit: 1,
+      );
+      if (rows.isEmpty) {
+        return const Failure(NotFoundFailure(message: 'Supplier not found.'));
+      }
+      return Success(_rowToSupplier(rows.first));
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load supplier: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Supplier?>> findSupplierByName(String name) async {
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'suppliers',
+        where: 'LOWER(name) = ?',
+        whereArgs: [name.toLowerCase()],
+        limit: 1,
+      );
+      if (rows.isEmpty) return const Success(null);
+      return Success(_rowToSupplier(rows.first));
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Supplier lookup failed: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Supplier>> createSupplier(Supplier s) async {
+    try {
+      final db = await _db;
+      await db.insert('suppliers', {
+        'id': s.id.value,
+        'name': s.name,
+        'contact_person': s.contactPerson,
+        'phone': s.phone,
+        'email': s.email,
+        'address': s.address,
+        'payment_terms': s.paymentTerms,
+        'status': s.status.name,
+        'created_at': s.createdAt.toIso8601String(),
+        'updated_at': s.updatedAt.toIso8601String(),
+      });
+      return Success(s);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to save supplier: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Supplier>> updateSupplier(Supplier s) async {
+    try {
+      final db = await _db;
+      final rows = await db.update(
+        'suppliers',
+        {
+          'name': s.name,
+          'contact_person': s.contactPerson,
+          'phone': s.phone,
+          'email': s.email,
+          'address': s.address,
+          'payment_terms': s.paymentTerms,
+          'status': s.status.name,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [s.id.value],
+      );
+      if (rows == 0)
+        return const Failure(NotFoundFailure(message: 'Supplier not found.'));
+      return Success(s);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to update supplier: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> deleteSupplier(SupplierId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.delete(
+        'suppliers',
+        where: 'id = ?',
+        whereArgs: [id.value],
+      );
+      if (rows == 0)
+        return const Failure(NotFoundFailure(message: 'Supplier not found.'));
+      return const Success(null);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to delete supplier: $e'));
+    }
+  }
+
+  @override
+  Future<Result<List<SupplierLedgerRow>>> getLedger(SupplierId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'supplier_ledger_entries',
+        where: 'supplier_id = ?',
+        whereArgs: [id.value],
+        orderBy: 'created_at ASC',
+      );
+
+      int running = 0;
+      final result = <SupplierLedgerRow>[];
+
+      for (final r in rows) {
+        final debit = r['debit'] as int;
+        final credit = r['credit'] as int;
+        // For suppliers, payable = credit - debit
+        running += (credit - debit);
+
+        final entry = SupplierLedgerEntry(
+          id: r['id'] as String,
+          supplierId: id,
+          entryType: SupplierEntryType.values.firstWhere(
+            (e) => e.name == r['entry_type'],
+            orElse: () => SupplierEntryType.adjustment,
+          ),
+          description: r['description'] as String,
+          reference: r['reference'] as String?,
+          debit: Money.fromPaisa(debit),
+          credit: Money.fromPaisa(credit),
+          paymentMethod: r['payment_method'] as String?,
+          operatorName: r['operator_name'] as String,
+          createdAt: DateTime.parse(r['created_at'] as String),
+        );
+
+        result.add(
+          SupplierLedgerRow(
+            entry: entry,
+            runningBalance: Money.fromPaisa(running),
+          ),
+        );
+      }
+
+      return Success(result.reversed.toList());
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load ledger: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Money>> getPayableBalance(SupplierId id) async {
+    try {
+      final db = await _db;
+      return Success(await _computePayable(db, id.value));
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to compute payable: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> addLedgerEntry(SupplierLedgerEntry entry) async {
+    try {
+      final db = await _db;
+      await db.insert('supplier_ledger_entries', {
+        'id': entry.id,
+        'supplier_id': entry.supplierId.value,
+        'entry_type': entry.entryType.name,
+        'description': entry.description,
+        'reference': entry.reference,
+        'debit': entry.debit.paisa,
+        'credit': entry.credit.paisa,
+        'payment_method': entry.paymentMethod,
+        'operator_name': entry.operatorName,
+        'created_at': entry.createdAt.toIso8601String(),
+      });
+      return const Success(null);
+    } catch (e) {
+      return Failure(
+        DatabaseFailure(message: 'Failed to record ledger entry: $e'),
+      );
+    }
+  }
+}
+
+========== FILE: lib/features/suppliers/application/supplier_use_cases.dart ==========
+import '../../../core/error/failures.dart';
+import '../../../core/result/result.dart';
+import '../../medicines/domain/value_objects.dart';
+import '../domain/supplier.dart';
+import '../domain/supplier_ledger.dart';
+import '../domain/supplier_repository.dart';
+
+class CreateSupplierUseCase {
+  final SupplierRepository _repo;
+  const CreateSupplierUseCase(this._repo);
+
+  Future<Result<Supplier>> execute(Supplier s) async {
+    if (s.name.trim().isEmpty) {
+      return const Failure(
+        ValidationFailure(message: 'Supplier name is required.'),
+      );
+    }
+    return _repo.createSupplier(s);
+  }
+}
+
+class UpdateSupplierUseCase {
+  final SupplierRepository _repo;
+  const UpdateSupplierUseCase(this._repo);
+
+  Future<Result<Supplier>> execute(Supplier s) async {
+    if (s.name.trim().isEmpty) {
+      return const Failure(
+        ValidationFailure(message: 'Supplier name is required.'),
+      );
+    }
+    return _repo.updateSupplier(s);
+  }
+}
+
+class GetSuppliersUseCase {
+  final SupplierRepository _repo;
+  const GetSuppliersUseCase(this._repo);
+
+  Future<Result<List<SupplierWithBalance>>> execute({String? searchQuery}) {
+    return _repo.getSuppliers(searchQuery: searchQuery);
+  }
+}
+
+class DeleteSupplierUseCase {
+  final SupplierRepository _repo;
+  const DeleteSupplierUseCase(this._repo);
+
+  Future<Result<void>> execute(SupplierId id) => _repo.deleteSupplier(id);
+}
+
+class GetSupplierLedgerUseCase {
+  final SupplierRepository _repo;
+  const GetSupplierLedgerUseCase(this._repo);
+
+  Future<Result<List<SupplierLedgerRow>>> execute(SupplierId id) =>
+      _repo.getLedger(id);
+}
+
+class RecordSupplierPaymentUseCase {
+  final SupplierRepository _repo;
+  const RecordSupplierPaymentUseCase(this._repo);
+
+  Future<Result<void>> execute({
+    required SupplierId supplierId,
+    required Money amount,
+    required String paymentMethod,
+    String? reference,
+    String? note,
+    required String operatorName,
+  }) async {
+    if (amount.paisa <= 0) {
+      return const Failure(
+        ValidationFailure(message: 'Payment amount must be greater than zero.'),
+      );
+    }
+
+    final entry = SupplierLedgerEntry(
+      id: SupplierLedgerEntry.newId(),
+      supplierId: supplierId,
+      entryType: SupplierEntryType.payment,
+      description: note == null || note.trim().isEmpty
+          ? 'Payment made ($paymentMethod)'
+          : note.trim(),
+      reference: reference,
+      debit: amount,
+      credit: Money.zero(),
+      paymentMethod: paymentMethod,
+      operatorName: operatorName,
+      createdAt: DateTime.now(),
+    );
+
+    return _repo.addLedgerEntry(entry);
+  }
+}
+
+/// Called by the Purchases module after creating a purchase.
+/// Posts a credit to the supplier's ledger (we owe them more).
+class PostPurchaseToSupplierUseCase {
+  final SupplierRepository _repo;
+  const PostPurchaseToSupplierUseCase(this._repo);
+
+  Future<Result<void>> execute({
+    required String supplierName,
+    required String invoiceNumber,
+    required Money amount,
+    required String operatorName,
+  }) async {
+    if (supplierName.trim().isEmpty) return const Success(null);
+
+    final findResult = await _repo.findSupplierByName(supplierName.trim());
+    if (findResult.isFailure) return Failure(findResult.failureOrNull!);
+    final supplier = findResult.valueOrNull;
+    if (supplier == null) return const Success(null);
+
+    final entry = SupplierLedgerEntry(
+      id: SupplierLedgerEntry.newId(),
+      supplierId: supplier.id,
+      entryType: SupplierEntryType.purchase,
+      description: 'Purchase $invoiceNumber',
+      reference: invoiceNumber,
+      debit: Money.zero(),
+      credit: amount,
+      operatorName: operatorName,
+      createdAt: DateTime.now(),
+    );
+
+    return _repo.addLedgerEntry(entry);
+  }
+}
+
+========== FILE: lib/features/suppliers/domain/supplier.dart ==========
+import 'dart:math';
+import '../../../core/domain/entity.dart';
+import '../../../core/domain/value_object.dart';
+import '../../medicines/domain/value_objects.dart';
+
+class SupplierId extends ValueObject {
+  final String value;
+  const SupplierId(this.value);
+
+  factory SupplierId.generate() {
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final rand = Random().nextInt(99999).toString().padLeft(5, '0');
+    return SupplierId('sup_${ts}_$rand');
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SupplierId &&
+          runtimeType == other.runtimeType &&
+          value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+}
+
+enum SupplierStatus {
+  active(label: 'Active'),
+  inactive(label: 'Inactive');
+
+  final String label;
+  const SupplierStatus({required this.label});
+}
+
+class Supplier extends Entity<SupplierId> {
+  final String name;
+  final String contactPerson;
+  final String phone;
+  final String email;
+  final String address;
+  final String paymentTerms;
+  final SupplierStatus status;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  const Supplier({
+    required super.id,
+    required this.name,
+    this.contactPerson = '',
+    this.phone = '',
+    this.email = '',
+    this.address = '',
+    this.paymentTerms = '',
+    this.status = SupplierStatus.active,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  Supplier copyWith({
+    String? name,
+    String? contactPerson,
+    String? phone,
+    String? email,
+    String? address,
+    String? paymentTerms,
+    SupplierStatus? status,
+    DateTime? updatedAt,
+  }) {
+    return Supplier(
+      id: id,
+      name: name ?? this.name,
+      contactPerson: contactPerson ?? this.contactPerson,
+      phone: phone ?? this.phone,
+      email: email ?? this.email,
+      address: address ?? this.address,
+      paymentTerms: paymentTerms ?? this.paymentTerms,
+      status: status ?? this.status,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? DateTime.now(),
+    );
+  }
+}
+
+class SupplierWithBalance {
+  final Supplier supplier;
+  final Money payable;
+  final DateTime? lastActivityAt;
+
+  const SupplierWithBalance({
+    required this.supplier,
+    required this.payable,
+    this.lastActivityAt,
+  });
+}
+
+========== FILE: lib/features/suppliers/presentation/widgets/supplier_form_dialog.dart ==========
+import 'package:flutter/material.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/theme/app_typography.dart';
+import '../../../../core/widgets/components.dart';
+import '../../domain/supplier.dart';
+import '../controllers/supplier_controller.dart';
+
+class SupplierFormDialog extends StatefulWidget {
+  final SupplierController controller;
+  final Supplier? existing;
+
+  const SupplierFormDialog({
+    super.key,
+    required this.controller,
+    this.existing,
+  });
+
+  @override
+  State<SupplierFormDialog> createState() => _SupplierFormDialogState();
+}
+
+class _SupplierFormDialogState extends State<SupplierFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _contactCtrl;
+  late final TextEditingController _phoneCtrl;
+  late final TextEditingController _emailCtrl;
+  late final TextEditingController _addressCtrl;
+  late final TextEditingController _termsCtrl;
+  SupplierStatus _status = SupplierStatus.active;
+  bool _isSaving = false;
+
+  bool get _isEdit => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final s = widget.existing;
+    _nameCtrl = TextEditingController(text: s?.name ?? '');
+    _contactCtrl = TextEditingController(text: s?.contactPerson ?? '');
+    _phoneCtrl = TextEditingController(text: s?.phone ?? '');
+    _emailCtrl = TextEditingController(text: s?.email ?? '');
+    _addressCtrl = TextEditingController(text: s?.address ?? '');
+    _termsCtrl = TextEditingController(text: s?.paymentTerms ?? '');
+    _status = s?.status ?? SupplierStatus.active;
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _contactCtrl.dispose();
+    _phoneCtrl.dispose();
+    _emailCtrl.dispose();
+    _addressCtrl.dispose();
+    _termsCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _isSaving = true);
+
+    final now = DateTime.now();
+    final supplier = Supplier(
+      id: _isEdit ? widget.existing!.id : SupplierId.generate(),
+      name: _nameCtrl.text.trim(),
+      contactPerson: _contactCtrl.text.trim(),
+      phone: _phoneCtrl.text.trim(),
+      email: _emailCtrl.text.trim(),
+      address: _addressCtrl.text.trim(),
+      paymentTerms: _termsCtrl.text.trim(),
+      status: _status,
+      createdAt: widget.existing?.createdAt ?? now,
+      updatedAt: now,
+    );
+
+    final error = _isEdit
+        ? await widget.controller.updateSupplier(supplier)
+        : await widget.controller.createSupplier(supplier);
+
+    setState(() => _isSaving = false);
+    if (mounted) Navigator.of(context).pop(error);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.local_shipping_outlined,
+                    color: AppColors.primary,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Text(
+                    _isEdit ? 'Edit Supplier' : 'Add Supplier',
+                    style: AppTypography.sectionTitle,
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                    onPressed: _isSaving
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    splashRadius: 18,
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.xl),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    AppTextField(
+                      controller: _nameCtrl,
+                      label: 'Supplier / Company Name',
+                      prefixIcon: Icons.business_rounded,
+                      isRequired: true,
+                      autofocus: true,
+                      validator: (v) =>
+                          v == null || v.trim().isEmpty ? 'Required' : null,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: AppTextField(
+                            controller: _contactCtrl,
+                            label: 'Contact Person',
+                            prefixIcon: Icons.person_outline_rounded,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: AppTextField(
+                            controller: _phoneCtrl,
+                            label: 'Phone',
+                            prefixIcon: Icons.phone_outlined,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    AppTextField(
+                      controller: _emailCtrl,
+                      label: 'Email',
+                      prefixIcon: Icons.email_outlined,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    AppTextField(
+                      controller: _addressCtrl,
+                      label: 'Address',
+                      prefixIcon: Icons.location_on_outlined,
+                      maxLines: 2,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: AppTextField(
+                            controller: _termsCtrl,
+                            label: 'Payment Terms',
+                            hint: 'e.g. Net 30',
+                            prefixIcon: Icons.schedule_outlined,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: DropdownButtonFormField<SupplierStatus>(
+                            value: _status,
+                            decoration: const InputDecoration(
+                              labelText: 'Status',
+                            ),
+                            items: SupplierStatus.values
+                                .map(
+                                  (s) => DropdownMenuItem(
+                                    value: s,
+                                    child: Text(s.label),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (v) => setState(
+                              () => _status = v ?? SupplierStatus.active,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  AppButton(
+                    label: 'Cancel',
+                    variant: AppButtonVariant.ghost,
+                    onPressed: _isSaving
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  AppButton(
+                    label: _isEdit ? 'Save Changes' : 'Add Supplier',
+                    variant: AppButtonVariant.primary,
+                    isLoading: _isSaving,
+                    onPressed: _isSaving ? null : _submit,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

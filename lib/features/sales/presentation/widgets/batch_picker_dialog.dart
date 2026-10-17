@@ -1,16 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
+import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
 import '../../../inventory/domain/batch.dart';
 import '../../../medicines/domain/medicine.dart';
 
-/// Dialog for selecting a batch when adding a medicine with multiple batches.
-///
-/// Batches are displayed in FEFO order; the earliest-expiry non-expired
-/// batch is preselected.
+/// Dialog for selecting a specific physical batch.
 class BatchPickerDialog extends StatelessWidget {
   final Medicine medicine;
   final List<Batch> batches;
@@ -27,7 +24,7 @@ class BatchPickerDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return Dialog(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 480),
+        constraints: const BoxConstraints(maxWidth: 580, maxHeight: 520),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -42,9 +39,10 @@ class BatchPickerDialog extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Select Batch', style: AppTypography.sectionTitle),
+                        Text('Select Specific Batch',
+                            style: AppTypography.sectionTitle),
                         Text(
-                          '${medicine.name} ${medicine.strength}',
+                          '${medicine.name} ${medicine.strength}  •  Select batch to apply batch-specific price & stock deduction',
                           style: AppTypography.bodySmall,
                         ),
                       ],
@@ -65,20 +63,22 @@ class BatchPickerDialog extends StatelessWidget {
               child: batches.isEmpty
                   ? const AppEmptyState(
                 icon: Icons.layers_outlined,
-                title: 'No batches available',
+                title: 'No active stock batches available',
                 subtitle:
-                'Register a batch for this medicine before selling.',
+                'Receive a purchase invoice for this medicine to create physical batches.',
               )
                   : ListView.separated(
-                padding: const EdgeInsets.symmetric(
-                  vertical: AppSpacing.sm,
-                ),
+                padding:
+                const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                 itemCount: batches.length,
                 separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (ctx, i) {
                   final b = batches[i];
                   final isCurrent = currentBatchId == b.id;
                   final isFefo = i == 0;
+                  final isDisabled =
+                      b.status == BatchStatus.expired ||
+                          b.quantity.value <= 0;
 
                   AppBadgeVariant statusVariant;
                   switch (b.status) {
@@ -91,11 +91,15 @@ class BatchPickerDialog extends StatelessWidget {
                   }
 
                   return InkWell(
-                    onTap: b.status == BatchStatus.expired
+                    onTap: isDisabled
                         ? null
                         : () => Navigator.of(context).pop(b),
                     child: Container(
-                      color: isCurrent ? AppColors.primarySurface : null,
+                      color: isCurrent
+                          ? AppColors.primarySurface
+                          : (isDisabled
+                          ? AppColors.surfaceVariant.withOpacity(0.5)
+                          : null),
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.lg,
                         vertical: AppSpacing.md,
@@ -103,29 +107,28 @@ class BatchPickerDialog extends StatelessWidget {
                       child: Row(
                         children: [
                           Column(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Row(
                                 children: [
                                   Text(
-                                    b.batchNumber.value,
+                                    'Batch: ${b.batchNumber.value}',
                                     style: AppTypography.subtitle
                                         .copyWith(fontSize: 14),
                                   ),
                                   if (isFefo) ...[
                                     const SizedBox(width: 8),
                                     const AppBadge(
-                                      label: 'FEFO',
+                                      label: 'FEFO Recommended',
                                       variant: AppBadgeVariant.primary,
                                     ),
                                   ],
                                 ],
                               ),
+                              const SizedBox(height: 2),
                               Text(
-                                'Expiry ${b.expiryDate.display}  ·  '
-                                    '${b.expiryDate.daysRemaining}d left',
+                                'Exp: ${b.expiryDate.display}  •  ${b.expiryDate.daysRemaining}d remaining',
                                 style: AppTypography.caption,
                               ),
                             ],
@@ -135,18 +138,26 @@ class BatchPickerDialog extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              // Display Batch Selling Price
                               Text(
-                                '${b.quantity.value} units',
-                                style: AppTypography.numeric
-                                    .copyWith(fontWeight: FontWeight.w700),
+                                b.sellingPrice.display,
+                                style: AppTypography.numeric.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primary,
+                                ),
                               ),
                               const SizedBox(height: 2),
-                              AppBadge(
-                                label: b.status.label,
-                                variant: statusVariant,
-                                isDot: true,
+                              Text(
+                                '${b.quantity.value} units in stock',
+                                style: AppTypography.bodySmall,
                               ),
                             ],
+                          ),
+                          const SizedBox(width: AppSpacing.md),
+                          AppBadge(
+                            label: b.status.label,
+                            variant: statusVariant,
+                            isDot: true,
                           ),
                         ],
                       ),

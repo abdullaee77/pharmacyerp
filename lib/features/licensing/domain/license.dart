@@ -1,5 +1,7 @@
+// lib/features/licensing/domain/license.dart
+
 import '../../../core/domain/value_object.dart';
-import '../../medicines/domain/value_objects.dart';
+import 'license_payload.dart';
 
 enum LicenseStatus {
   trial(label: 'Trial', color: 'info'),
@@ -19,14 +21,15 @@ class LicenseInfo extends ValueObject {
   final String productId;
   final String edition;
   final LicenseStatus status;
-  final String licenseKey;
+  final String licenseKey; // Holds raw JSON or License ID
   final DateTime? activationDate;
   final DateTime? expiryDate;
-  final String licensedTo;
-  final int maxUsers;
-  final int maxCounters;
-  final List<String> enabledModules;
+  final String customerName;
+  final String businessName;
+  final String machineId;
+  final String licenseType;
   final int daysRemaining;
+  final LicensePayload? payload;
 
   const LicenseInfo({
     required this.productId,
@@ -35,12 +38,15 @@ class LicenseInfo extends ValueObject {
     this.licenseKey = '',
     this.activationDate,
     this.expiryDate,
-    this.licensedTo = '',
-    this.maxUsers = 1,
-    this.maxCounters = 1,
-    this.enabledModules = const [],
+    this.customerName = '',
+    this.businessName = '',
+    this.machineId = '',
+    this.licenseType = 'lifetime',
     this.daysRemaining = 0,
+    this.payload,
   });
+
+  String get licensedTo => businessName.isNotEmpty ? businessName : customerName;
 
   bool get isValid =>
       status == LicenseStatus.active ||

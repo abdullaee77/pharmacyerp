@@ -1,6 +1,7 @@
+// lib/features/sales/data/sqlite_sales_repository.dart
+
 import 'dart:convert';
 import 'dart:math';
-
 import 'package:sqflite/sqflite.dart' as sql;
 
 import '../../../core/data/database_helper.dart';
@@ -22,16 +23,21 @@ class SqliteSalesRepository implements SalesRepository {
 
   Future<sql.Database> get _db => _dbHelper.database;
 
-  // ─── CREATE SALE ─────────────────────────────────────────────
+  // ─── CREATE SALE (FEFO ATOMIC STOCK DEDUCTION) ───────────────
 
   @override
   Future<Result<Sale>> createSale({
     required Sale sale,
     required List<PaymentTender> tenders,
+    String? accountId, // Added for Ledger
+    int accountAmountPaisa = 0, // Added for Ledger
   }) async {
     try {
       final db = await _db;
+      final nowIso = sale.createdAt.toIso8601String();
+
       await db.transaction((txn) async {
+        // 1. Save Sale Invoice Header
         await txn.insert('sales', {
           'id': sale.id.value,
           'invoice_number': sale.invoiceNumber.value,
@@ -43,9 +49,10 @@ class SqliteSalesRepository implements SalesRepository {
           'amount_received': sale.amountReceived.paisa,
           'change_amount': sale.change.paisa,
           'status': sale.status.name,
-          'created_at': sale.createdAt.toIso8601String(),
+          'created_at': nowIso,
         });
 
+        // 2. Save Line Items & Deduct Physical Batch Stock (FEFO)
         for (final item in sale.items) {
           await txn.insert('sale_items', {
             'id': item.id,
@@ -60,15 +67,128 @@ class SqliteSalesRepository implements SalesRepository {
             'discount_percent': item.discountPercent,
             'line_total': item.lineTotal.paisa,
           });
+
+          int remainingToDeduct = item.quantity;
+
+          // A. If a specific batch ID was provided by POS, deduct from it first
+          if (item.batchId.value.isNotEmpty) {
+            final batchRows = await txn.query(
+              'batches',
+              where: 'id = ? AND medicine_id = ?',
+              whereArgs: [item.batchId.value, item.medicineId.value],
+            );
+
+            if (batchRows.isNotEmpty) {
+              final currentBatchQty = batchRows.first['quantity'] as int;
+              final take = currentBatchQty >= remainingToDeduct
+                  ? remainingToDeduct
+                  : currentBatchQty;
+
+              await txn.update(
+                'batches',
+                {
+                  'quantity': currentBatchQty - take,
+                  'updated_at': nowIso,
+                },
+                where: 'id = ?',
+                whereArgs: [item.batchId.value],
+              );
+
+              remainingToDeduct -= take;
+            }
+          }
+
+          // B. FEFO Auto-Deduction: Deduct remaining units from oldest active batches
+          if (remainingToDeduct > 0) {
+            final batches = await txn.query(
+              'batches',
+              where: 'medicine_id = ? AND quantity > 0',
+              whereArgs: [item.medicineId.value],
+              orderBy: 'expiry_date ASC',
+            );
+
+            for (final b in batches) {
+              if (remainingToDeduct <= 0) break;
+              final bId = b['id'] as String;
+              final bQty = b['quantity'] as int;
+              final take = bQty >= remainingToDeduct ? remainingToDeduct : bQty;
+
+              await txn.update(
+                'batches',
+                {
+                  'quantity': bQty - take,
+                  'updated_at': nowIso,
+                },
+                where: 'id = ?',
+                whereArgs: [bId],
+              );
+
+              remainingToDeduct -= take;
+            }
+          }
+
+          // C. Deduct total balance in inventory_stocks table
+          final stockRows = await txn.query(
+            'inventory_stocks',
+            where: 'medicine_id = ?',
+            whereArgs: [item.medicineId.value],
+          );
+
+          if (stockRows.isNotEmpty) {
+            final currentStock = stockRows.first['quantity'] as int;
+            await txn.update(
+              'inventory_stocks',
+              {'quantity': currentStock - item.quantity},
+              where: 'medicine_id = ?',
+              whereArgs: [item.medicineId.value],
+            );
+          } else {
+            await txn.insert('inventory_stocks', {
+              'medicine_id': item.medicineId.value,
+              'quantity': -item.quantity,
+            });
+          }
+
+          // D. Log immutable inventory movement
+          final movementId = 'mov_sale_${sale.id.value}_${item.id}';
+          await txn.insert('inventory_movements', {
+            'id': movementId,
+            'medicine_id': item.medicineId.value,
+            'batch_id':
+            item.batchId.value.isNotEmpty ? item.batchId.value : null,
+            'type': 'sale',
+            'quantity_changed': -item.quantity,
+            'reason': 'Sale (Invoice: ${sale.invoiceNumber.value})',
+            'reference': sale.invoiceNumber.value,
+            'operator_name': sale.operatorName,
+            'created_at': nowIso,
+          });
         }
 
+        // 3. Save Payment Tenders
         for (final tender in tenders) {
           await txn.insert('sale_payments', {
-            'id': 'pay_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(9999)}',
+            'id':
+            'pay_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(9999)}',
             'sale_id': sale.id.value,
             'method': tender.method.name,
             'amount': tender.amount.paisa,
             'reference': tender.reference,
+          });
+        }
+
+        // 4. Ledger: MONEY IN (Debit)
+        if (accountId != null && accountId.isNotEmpty && accountAmountPaisa > 0) {
+          await txn.insert('financial_transactions', {
+            'id': 'ft_sale_${sale.id.value}',
+            'account_id': accountId,
+            'source': 'sale',
+            'description': 'Sale ${sale.invoiceNumber.value} — ${sale.customerName}',
+            'reference': sale.invoiceNumber.value,
+            'debit': accountAmountPaisa, // Money arriving in till
+            'credit': 0,
+            'operator_name': sale.operatorName,
+            'created_at': nowIso,
           });
         }
       });
@@ -152,7 +272,8 @@ class SqliteSalesRepository implements SalesRepository {
       where: 'sale_id = ?',
       whereArgs: [saleId],
     );
-    return rows.map((r) => SaleItem(
+    return rows
+        .map((r) => SaleItem(
       id: r['id'] as String,
       medicineId: MedicineId(r['medicine_id'] as String),
       medicineName: r['medicine_name'] as String,
@@ -163,7 +284,8 @@ class SqliteSalesRepository implements SalesRepository {
       unitPrice: Money.fromPaisa(r['unit_price'] as int),
       discountPercent: r['discount_percent'] as int,
       lineTotal: Money.fromPaisa(r['line_total'] as int),
-    )).toList();
+    ))
+        .toList();
   }
 
   Sale _rowToSale(Map<String, dynamic> row, List<SaleItem> items) {
@@ -197,14 +319,16 @@ class SqliteSalesRepository implements SalesRepository {
         where: 'sale_id = ?',
         whereArgs: [id.value],
       );
-      final tenders = rows.map((r) => PaymentTender(
+      final tenders = rows
+          .map((r) => PaymentTender(
         method: PaymentMethod.values.firstWhere(
               (e) => e.name == r['method'],
           orElse: () => PaymentMethod.cash,
         ),
         amount: Money.fromPaisa(r['amount'] as int),
         reference: r['reference'] as String?,
-      )).toList();
+      ))
+          .toList();
       return Success(tenders);
     } catch (e) {
       return Failure(DatabaseFailure(message: 'Failed to load payments: $e'));
@@ -217,20 +341,16 @@ class SqliteSalesRepository implements SalesRepository {
   Future<Result<SalesReturn>> createSalesReturn(SalesReturn r) async {
     try {
       final db = await _db;
-
-      // Damaged / expired items are NOT restocked
       final restock = r.reason != SalesReturnReason.damaged &&
           r.reason != SalesReturnReason.expired;
 
       await db.transaction((txn) async {
-        // Idempotency guard
         final existing = await txn.rawQuery(
           'SELECT 1 FROM sales_returns WHERE id = ? LIMIT 1',
           [r.id.value],
         );
         if (existing.isNotEmpty) return;
 
-        // 1. Return header + items
         await txn.insert('sales_returns', {
           'id': r.id.value,
           'original_sale_id': r.originalSaleId.value,
@@ -256,7 +376,6 @@ class SqliteSalesRepository implements SalesRepository {
           });
         }
 
-        // 2. Restore stock (only for resellable returns)
         if (restock) {
           final nowIso = DateTime.now().toIso8601String();
           for (var i = 0; i < r.items.length; i++) {
@@ -286,7 +405,6 @@ class SqliteSalesRepository implements SalesRepository {
           }
         }
 
-        // 3. Update original sale status
         await txn.update(
           'sales',
           {'status': SaleStatus.partiallyReturned.name},
@@ -297,7 +415,8 @@ class SqliteSalesRepository implements SalesRepository {
 
       return Success(r);
     } catch (e) {
-      return Failure(DatabaseFailure(message: 'Atomic sales return failed: $e'));
+      return Failure(
+          DatabaseFailure(message: 'Atomic sales return failed: $e'));
     }
   }
 
@@ -332,7 +451,8 @@ class SqliteSalesRepository implements SalesRepository {
           totalRefund: Money.fromPaisa(row['total_refund'] as int),
           operatorName: row['operator_name'] as String,
           createdAt: DateTime.parse(row['created_at'] as String),
-          items: items.map((r) => SalesReturnItem(
+          items: items
+              .map((r) => SalesReturnItem(
             id: r['id'] as String,
             originalSaleItemId: r['original_sale_item_id'] as String,
             medicineId: MedicineId(r['medicine_id'] as String),
@@ -341,7 +461,8 @@ class SqliteSalesRepository implements SalesRepository {
             batchNumber: r['batch_number'] as String,
             quantity: r['quantity'] as int,
             refundAmount: Money.fromPaisa(r['refund_amount'] as int),
-          )).toList(),
+          ))
+              .toList(),
         ));
       }
 
@@ -369,7 +490,8 @@ class SqliteSalesRepository implements SalesRepository {
       }
       return Success(map);
     } catch (e) {
-      return Failure(DatabaseFailure(message: 'Failed to load return quantities: $e'));
+      return Failure(
+          DatabaseFailure(message: 'Failed to load return quantities: $e'));
     }
   }
 }

@@ -86,7 +86,6 @@ class _PosSearchPanelState extends State<PosSearchPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Layout container with outer background/border/shadow completely removed
         Container(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
           child: TextField(
@@ -106,7 +105,6 @@ class _PosSearchPanelState extends State<PosSearchPanel> {
               ),
               filled: true,
               fillColor: AppColors.surface,
-              // Strictly using clean, native OutlineInputBorders on the TextField itself
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(AppRadius.md),
                 borderSide: const BorderSide(color: AppColors.border),
@@ -233,12 +231,16 @@ class _PosSearchPanelState extends State<PosSearchPanel> {
                           ),
                           Expanded(
                             flex: 2,
-                            child: Text(m.sellingPrice.display, textAlign: TextAlign.right, style: AppTypography.numericSmall),
+                            child: Text(
+                              item.displayPrice.display,
+                              textAlign: TextAlign.right,
+                              style: AppTypography.numericSmall,
+                            ),
                           ),
                           Expanded(
                             flex: 2,
                             child: Text(
-                              m.boxPrice.display,
+                              item.displayBoxPrice.display,
                               textAlign: TextAlign.right,
                               style: AppTypography.numericSmall.copyWith(
                                 color: AppColors.primary,

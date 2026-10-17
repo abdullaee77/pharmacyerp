@@ -1,10 +1,10 @@
 // lib/features/licensing/data/mock_license_repository.dart
 
-import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:pharmacy/core/data/database_helper.dart';
 import 'package:pharmacy/core/error/failures.dart';
 import 'package:pharmacy/core/result/result.dart';
+import 'package:pharmacy/features/licensing/domain/device_fingerprint.dart';
 import 'package:pharmacy/features/licensing/domain/license.dart';
 import 'package:pharmacy/features/licensing/domain/license_repository.dart';
 
@@ -15,6 +15,9 @@ class MockLicenseRepository implements LicenseRepository {
       : _dbHelper = dbHelper ?? DatabaseHelper.instance;
 
   Future<Database> get _db => _dbHelper.database;
+
+  @override
+  String getMachineId() => DeviceFingerprint.generate();
 
   @override
   Future<Result<LicenseInfo>> getLicenseInfo() async {
@@ -30,10 +33,11 @@ class MockLicenseRepository implements LicenseRepository {
 
       final key = settings['license_key'] ?? '';
       if (key.isEmpty) {
-        return const Success(LicenseInfo(
+        return Success(LicenseInfo(
           productId: 'PHARMASUITE-ERP',
           edition: 'Express',
           status: LicenseStatus.activationRequired,
+          machineId: getMachineId(),
         ));
       }
 
@@ -67,7 +71,7 @@ class MockLicenseRepository implements LicenseRepository {
             'license_activation_date': nowStr,
             'license_expiry_date': info.expiryDate?.toIso8601String() ?? '',
             'license_type': info.edition,
-            'license_licensed_to': info.licensedTo,
+            'license_licensed_to': info.businessName,
           };
 
           for (final entry in payload.entries) {
@@ -97,17 +101,14 @@ class MockLicenseRepository implements LicenseRepository {
     );
   }
 
-  /// Wipes all license data and registered administrators from SQLite settings & users tables.
+  @override
   Future<Result<void>> deactivateLicense() async {
     try {
       final db = await _db;
       final batch = db.batch();
 
-      // Wipe licensing records
       batch.delete('settings', where: "key LIKE 'license_%'");
       batch.delete('settings', where: "key = 'pharmacy_name'");
-
-      // Wipe master users so fresh onboarding is triggered
       batch.delete('users');
 
       await batch.commit(noResult: true);
@@ -125,40 +126,41 @@ class MockLicenseRepository implements LicenseRepository {
 
     DateTime? expiry;
     LicenseStatus status;
-    String licensedTo;
+    String businessName;
     String edition;
     int daysRemaining = 0;
 
     if (key == 'TEST-LIFETIME-KEY') {
       expiry = null;
       status = LicenseStatus.active;
-      licensedTo = 'Demo Pharmacy (Lifetime)';
+      businessName = 'Demo Pharmacy (Lifetime)';
       edition = 'Enterprise Lifetime';
       daysRemaining = 99999;
     } else if (key == 'TEST-ACTIVE-YEARLY') {
       expiry = activation.add(const Duration(days: 365));
       status = now.isBefore(expiry) ? LicenseStatus.active : LicenseStatus.expired;
-      licensedTo = 'Demo Pharmacy (1 Year)';
+      businessName = 'Demo Pharmacy (1 Year)';
       edition = 'Professional Annual';
       daysRemaining = expiry.difference(now).inDays;
     } else if (key == 'TEST-2DAYS-TRIAL') {
       expiry = activation.add(const Duration(days: 2));
       status = now.isBefore(expiry) ? LicenseStatus.trial : LicenseStatus.expired;
-      licensedTo = 'Evaluation Store';
+      businessName = 'Evaluation Store';
       edition = 'Evaluation License';
       daysRemaining = expiry.difference(now).inDays;
     } else if (key == 'TEST-EXPIRED-DEMO') {
       final backdatedActivation = now.subtract(const Duration(days: 10));
       expiry = backdatedActivation.add(const Duration(days: 5));
       status = LicenseStatus.expired;
-      licensedTo = 'Expired Demonstration Sandbox';
+      businessName = 'Expired Demonstration Sandbox';
       edition = 'Evaluation License (Expired)';
       daysRemaining = expiry.difference(now).inDays;
     } else {
-      return const Success(LicenseInfo(
+      return Success(LicenseInfo(
         productId: 'PHARMASUITE-ERP',
         edition: 'Unknown',
         status: LicenseStatus.invalid,
+        machineId: getMachineId(),
       ));
     }
 
@@ -169,15 +171,10 @@ class MockLicenseRepository implements LicenseRepository {
       licenseKey: key,
       activationDate: activation,
       expiryDate: expiry,
-      licensedTo: licensedTo,
-      maxUsers: key == 'TEST-LIFETIME-KEY' ? 99 : 5,
-      maxCounters: key == 'TEST-LIFETIME-KEY' ? 10 : 2,
+      businessName: businessName,
+      customerName: businessName,
+      machineId: getMachineId(),
       daysRemaining: daysRemaining,
-      enabledModules: const [
-        'Dashboard', 'Medicines', 'Inventory', 'Sales',
-        'Purchases', 'Customers', 'Suppliers', 'Accounts',
-        'Reports', 'Users', 'Settings', 'Licensing',
-      ],
     ));
   }
 }

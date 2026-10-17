@@ -423,11 +423,16 @@ class SqliteReportRepository implements ReportRepository {
       final stockValue = stockRows.isEmpty ? 0 : (stockRows.first['val'] as num).toInt();
       final totalMeds = stockRows.isEmpty ? 0 : (stockRows.first['meds'] as num).toInt();
 
-      // Low stock
+      // Low stock (FIXED: LEFT JOIN + Fallback default threshold of 10 if min_stock_level is 0)
       final lowRows = await db.rawQuery('''
-        SELECT COUNT(*) AS cnt FROM inventory_stocks s
-        JOIN medicines m ON s.medicine_id = m.id
-        WHERE s.quantity <= m.min_stock_level AND s.quantity > 0
+        SELECT COUNT(*) AS cnt
+        FROM medicines m
+        LEFT JOIN inventory_stocks s ON m.id = s.medicine_id
+        WHERE m.status = 'active'
+          AND COALESCE(s.quantity, 0) <= CASE
+                WHEN m.min_stock_level IS NULL OR m.min_stock_level <= 0 THEN 10
+                ELSE m.min_stock_level
+              END
       ''');
       final lowCount = lowRows.isEmpty ? 0 : (lowRows.first['cnt'] as num).toInt();
 

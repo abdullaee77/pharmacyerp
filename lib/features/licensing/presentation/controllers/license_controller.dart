@@ -1,3 +1,5 @@
+// lib/features/licensing/presentation/controllers/license_controller.dart
+
 import 'package:flutter/material.dart';
 import '../../domain/license.dart';
 import '../../domain/license_repository.dart';
@@ -6,7 +8,7 @@ class LicenseController extends ChangeNotifier {
   final LicenseRepository _repository;
 
   LicenseController({required LicenseRepository repository})
-    : _repository = repository;
+      : _repository = repository;
 
   LicenseInfo? _license;
   bool _isLoading = false;
@@ -16,6 +18,7 @@ class LicenseController extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get isValid => _license?.isValid ?? false;
+  String get machineId => _repository.getMachineId();
 
   Future<void> loadLicense() async {
     _isLoading = true;
@@ -37,11 +40,12 @@ class LicenseController extends ChangeNotifier {
     );
   }
 
-  Future<String?> activateLicense(String key) async {
+  Future<String?> activateLicense(String rawPayload) async {
     _isLoading = true;
+    _error = null;
     notifyListeners();
 
-    final result = await _repository.activateLicense(key);
+    final result = await _repository.activateLicense(rawPayload);
     return result.fold(
       onSuccess: (info) {
         _license = info;

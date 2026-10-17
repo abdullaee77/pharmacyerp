@@ -88,6 +88,7 @@ class InventoryController extends ChangeNotifier {
     required AdjustmentReason reason,
     String? reference,
     required String operatorName,
+    String? batchId, // ← Added
   }) async {
     final result = await _adjustStock.execute(
       medicineId: medicineId,
@@ -95,6 +96,7 @@ class InventoryController extends ChangeNotifier {
       reason: reason,
       reference: reference,
       operatorName: operatorName,
+      batchId: batchId, // ← Passed to usecase
     );
 
     return result.fold(

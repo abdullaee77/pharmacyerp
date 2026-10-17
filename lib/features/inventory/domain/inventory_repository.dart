@@ -17,6 +17,7 @@ abstract class InventoryRepository {
     required AdjustmentReason reason,
     String? reference,
     required String operatorName,
+    String? batchId, // ← Added
   });
 
   Future<Result<List<InventoryMovement>>> getMovementsForMedicine(

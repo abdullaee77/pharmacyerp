@@ -27,9 +27,6 @@ class CartItemId extends ValueObject {
 }
 
 /// Immutable snapshot of a cart line.
-///
-/// Prices are snapshotted at the moment of addition so later master data
-/// changes do not retroactively modify the current transaction.
 class CartItem extends ValueObject {
   final CartItemId id;
   final Medicine medicine;
@@ -62,13 +59,14 @@ class CartItem extends ValueObject {
     int? quantity,
     int? discountPercent,
     Batch? batch,
+    Money? unitPrice, // Added unitPrice support
   }) {
     return CartItem(
       id: id,
       medicine: medicine,
       batch: batch ?? this.batch,
       quantity: quantity ?? this.quantity,
-      unitPrice: unitPrice,
+      unitPrice: unitPrice ?? this.unitPrice,
       discountPercent: discountPercent ?? this.discountPercent,
     );
   }

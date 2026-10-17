@@ -1,29 +1,38 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
+import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
 import '../../../../core/widgets/permission_gate.dart';
+import '../../../accounts/presentation/controllers/account_controller.dart'; // REQUIRED
 import '../../../authentication/presentation/controllers/auth_controller.dart';
 import '../../../inventory/presentation/controllers/batch_controller.dart';
-import '../../../inventory/presentation/screens/batch_list_screen.dart';
 import '../../../users/domain/role.dart';
 import '../../domain/purchase.dart';
 import '../controllers/purchase_controller.dart';
 import '../widgets/purchase_form_dialog.dart';
 import '../widgets/purchase_return_dialog.dart';
 
+class _PurchasedBatchRow {
+  final Purchase purchase;
+  final PurchaseItem item;
+
+  _PurchasedBatchRow({required this.purchase, required this.item});
+}
+
 class PurchaseWorkspaceScreen extends StatefulWidget {
   final PurchaseController controller;
   final BatchController batchController;
   final AuthController authController;
+  final AccountController? accountController; // Added AccountController
 
   const PurchaseWorkspaceScreen({
     super.key,
     required this.controller,
     required this.batchController,
     required this.authController,
+    this.accountController,
   });
 
   @override
@@ -41,6 +50,7 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
     _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.controller.loadPurchases();
+      widget.accountController?.loadAccounts(); // Load accounts for purchases
     });
   }
 
@@ -57,13 +67,21 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
       PermissionCategory.purchases, PermissionAction.returnAction);
 
   Future<void> _openReceiveForm() async {
-    final error = await showDialog<String>(
+    await widget.accountController?.loadAccounts(silent: true);
+    final accounts = widget.accountController?.accounts ?? const [];
+
+    final result = await showDialog<dynamic>(
       context: context,
-      builder: (ctx) => PurchaseFormDialog(controller: widget.controller),
+      builder: (ctx) => PurchaseFormDialog(
+        controller: widget.controller,
+        accounts: accounts, // PASS ACCOUNTS HERE
+      ),
     );
-    if (error != null && mounted) {
-      AppToast.error(context, error);
-    } else if (error == null && mounted) {
+    if (!mounted) return;
+    if (result is String) {
+      AppToast.error(context, result);
+    } else if (result == true) {
+      widget.accountController?.loadAccounts(); // Refresh account balances
       AppToast.success(
         context,
         'Purchase received and physical stock levels increased.',
@@ -77,7 +95,8 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
       builder: (ctx) => PurchaseReturnDialog(
         purchase: p,
         controller: widget.controller,
-        operatorName: widget.authController.currentUser?.fullName ?? 'Operator',
+        operatorName:
+        widget.authController.currentUser?.fullName ?? 'Operator',
       ),
     );
     if (result == true && mounted) {
@@ -137,7 +156,7 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
               tabAlignment: TabAlignment.start,
               tabs: const [
                 Tab(text: 'Procurement History'),
-                Tab(text: 'Physical Batches / Expiry'),
+                Tab(text: 'Purchased Batches'),
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -147,10 +166,7 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
                 controller: _tabController,
                 children: [
                   _buildProcurementTab(ctrl),
-                  BatchListScreen(
-                    controller: widget.batchController,
-                    authController: widget.authController,
-                  ),
+                  _buildPurchasedBatchesTab(ctrl),
                 ],
               ),
             ),
@@ -171,6 +187,170 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
         ),
         const SizedBox(height: AppSpacing.md),
         Expanded(child: _buildTable(ctrl)),
+      ],
+    );
+  }
+
+  Widget _buildPurchasedBatchesTab(PurchaseController ctrl) {
+    if (ctrl.isLoading) {
+      return const AppLoading(message: 'Loading purchased batch records...');
+    }
+
+    final List<_PurchasedBatchRow> rows = [];
+    final query = ctrl.searchQuery.toLowerCase().trim();
+
+    for (final purchase in ctrl.purchases) {
+      for (final item in purchase.items) {
+        if (query.isNotEmpty) {
+          final match = item.medicineName.toLowerCase().contains(query) ||
+              item.batchNumber.toLowerCase().contains(query) ||
+              purchase.invoiceNumber.value.toLowerCase().contains(query) ||
+              purchase.supplierName.toLowerCase().contains(query);
+          if (!match) continue;
+        }
+        rows.add(_PurchasedBatchRow(purchase: purchase, item: item));
+      }
+    }
+
+    if (rows.isEmpty) {
+      return const AppEmptyState(
+        icon: Icons.layers_outlined,
+        title: 'No purchased batch records found',
+        subtitle:
+        'Received purchase line items will appear here as permanent bought records.',
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AppSearchBar(
+          hint: 'Search batch number, medicine, invoice...',
+          maxWidth: 400,
+          onSearch: ctrl.search,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              child: SingleChildScrollView(
+                child: DataTable(
+                  headingRowHeight: 44,
+                  dataRowMinHeight: 46,
+                  dataRowMaxHeight: 52,
+                  horizontalMargin: AppSpacing.lg,
+                  columnSpacing: AppSpacing.xl,
+                  headingRowColor:
+                  WidgetStatePropertyAll(AppColors.surfaceVariant),
+                  columns: const [
+                    DataColumn(label: Text('Medicine Name')),
+                    DataColumn(label: Text('Batch No.')),
+                    DataColumn(label: Text('Expiry Date')),
+                    DataColumn(
+                      label: Text(
+                        'Bought Qty',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      tooltip:
+                      'Original quantity purchased on receipt (Immutable)',
+                      numeric: true,
+                    ),
+                    DataColumn(label: Text('Unit Cost'), numeric: true),
+                    DataColumn(label: Text('MRP'), numeric: true),
+                    DataColumn(label: Text('Sell Price'), numeric: true),
+                    DataColumn(label: Text('Total Cost'), numeric: true),
+                    DataColumn(label: Text('Invoice No.')),
+                    DataColumn(label: Text('Date Received')),
+                  ],
+                  rows: rows.map((r) {
+                    final item = r.item;
+                    final p = r.purchase;
+                    final dateStr =
+                        '${p.createdAt.day.toString().padLeft(2, '0')}/'
+                        '${p.createdAt.month.toString().padLeft(2, '0')}/'
+                        '${p.createdAt.year}';
+                    final expStr =
+                        '${item.expiryDate.month.toString().padLeft(2, '0')}/'
+                        '${item.expiryDate.year}';
+
+                    return DataRow(
+                      cells: [
+                        DataCell(
+                          Text(
+                            item.medicineName,
+                            style: AppTypography.tableCell.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            item.batchNumber,
+                            style: AppTypography.numericSmall.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        DataCell(Text(expStr, style: AppTypography.tableCell)),
+                        DataCell(
+                          Text(
+                            '${item.quantity}',
+                            style: AppTypography.numeric.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            item.purchasePrice.display,
+                            style: AppTypography.numericSmall,
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            item.mrp.display,
+                            style: AppTypography.numericSmall,
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            item.sellingPrice.display,
+                            style: AppTypography.numericSmall,
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            item.lineTotal.display,
+                            style: AppTypography.numeric.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            p.invoiceNumber.value,
+                            style:
+                            AppTypography.subtitle.copyWith(fontSize: 13),
+                          ),
+                        ),
+                        DataCell(
+                          Text(dateStr, style: AppTypography.tableCell),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -221,15 +401,12 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
               DataColumn(label: Text('Actions')),
             ],
             rows: ctrl.purchases.map((p) {
-              AppBadgeVariant variant;
-              switch (p.status) {
-                case PurchaseStatus.completed:
-                  variant = AppBadgeVariant.success;
-                case PurchaseStatus.partiallyReturned:
-                  variant = AppBadgeVariant.warning;
-                case PurchaseStatus.returned:
-                  variant = AppBadgeVariant.error;
-              }
+              final variant = switch (p.status) {
+                PurchaseStatus.completed => AppBadgeVariant.success,
+                PurchaseStatus.partiallyReturned => AppBadgeVariant.warning,
+                PurchaseStatus.returned => AppBadgeVariant.error,
+                PurchaseStatus.cancelled => AppBadgeVariant.neutral,
+              };
 
               final dateStr =
                   '${p.createdAt.day.toString().padLeft(2, '0')}/'
@@ -273,7 +450,8 @@ class _PurchaseWorkspaceScreenState extends State<PurchaseWorkspaceScreen>
                       icon: Icons.assignment_return_outlined,
                       variant: AppButtonVariant.outlined,
                       size: AppButtonSize.small,
-                      onPressed: p.status == PurchaseStatus.returned
+                      onPressed: p.status == PurchaseStatus.returned ||
+                          p.status == PurchaseStatus.cancelled
                           ? null
                           : () => _openReturn(p),
                     )

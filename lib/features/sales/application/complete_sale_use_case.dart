@@ -14,9 +14,7 @@ import '../domain/sales_repository.dart';
 /// Completes a POS checkout as ONE atomic transaction.
 ///
 ///  - Client PC  : the sale is sent to the server (`/api/sales/complete`),
-///                 which runs the transaction on the shared database. Before
-///                 this change a client saved the sale to its own local
-///                 SQLite, so it never reached the server.
+///                 which runs the transaction on the shared database.
 ///  - Server PC / standalone: the same transaction runs on the local database.
 class CompleteSaleUseCase {
   final DatabaseHelper _dbHelper;
@@ -32,10 +30,13 @@ class CompleteSaleUseCase {
     required Sale sale,
     required List<PaymentTender> tenders,
     String? customerPhone,
+    String? accountId,
+    int accountAmountPaisa = 0,
   }) async {
     final creditTender = tenders.firstWhere(
           (t) => t.method == PaymentMethod.credit,
-      orElse: () => PaymentTender(method: PaymentMethod.cash, amount: Money.zero()),
+      orElse: () =>
+          PaymentTender(method: PaymentMethod.cash, amount: Money.zero()),
     );
 
     final Map<String, dynamic> payload = {
@@ -81,6 +82,9 @@ class CompleteSaleUseCase {
       'customerName': sale.customerName,
       'customerPhone': customerPhone ?? '',
       'creditAmount': creditTender.amount.paisa,
+      // Ledger deposit (cash/bank in)
+      'accountId': accountId,
+      'accountAmountPaisa': accountAmountPaisa,
     };
 
     // ── Client PC: let the server run the transaction ──
@@ -93,6 +97,25 @@ class CompleteSaleUseCase {
     try {
       final db = await _dbHelper.database;
       await SaleTransaction.run(db, payload);
+
+      // Ledger: MONEY IN (debit) — deposit tendered amount to selected account
+      if (accountId != null &&
+          accountId.isNotEmpty &&
+          accountAmountPaisa > 0) {
+        await db.insert('financial_transactions', {
+          'id': 'ft_sale_${sale.id.value}',
+          'account_id': accountId,
+          'source': 'sale',
+          'description':
+          'Sale ${sale.invoiceNumber.value} — ${sale.customerName}',
+          'reference': sale.invoiceNumber.value,
+          'debit': accountAmountPaisa,
+          'credit': 0,
+          'operator_name': sale.operatorName,
+          'created_at': sale.createdAt.toIso8601String(),
+        });
+      }
+
       return const Success(null);
     } on SaleException catch (e) {
       return Failure(

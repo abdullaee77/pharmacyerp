@@ -10,6 +10,7 @@ import '../../../users/domain/role.dart';
 import '../../domain/medicine.dart';
 import '../controllers/medicine_controller.dart';
 import '../widgets/medicine_form_dialog.dart';
+import '../widgets/medicine_bulk_import_dialog.dart';
 
 class MedicineListScreen extends StatefulWidget {
   final MedicineController controller;
@@ -55,18 +56,38 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
     );
 
     if (result != null && mounted) {
-      final error = await widget.controller.createMedicineWithStock(result);
+      final error = await widget.controller.createMedicine(result.medicine);
       if (!mounted) return;
       if (error != null) {
         AppToast.error(context, error);
       } else {
-        final stockMsg = result.openingStock != null
-            ? ' with ${result.openingStock!.quantity} units stock'
-            : '';
         AppToast.success(
-            context, 'Medicine "${result.medicine.name}" added$stockMsg.');
+          context,
+          'Medicine "${result.medicine.name}" added successfully.',
+        );
       }
     }
+  }
+
+  Future<void> _openBulkImport() async {
+    final result = await showDialog<List<Medicine>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const MedicineBulkImportDialog(),
+    );
+
+    if (result == null || result.isEmpty || !mounted) return;
+
+    final summary = await widget.controller.bulkCreateMedicines(result);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(summary),
+        backgroundColor: AppColors.success,
+        duration: const Duration(seconds: 5),
+      ),
+    );
   }
 
   Future<void> _openEditDialog(Medicine m) async {
@@ -179,13 +200,29 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                     ),
                   ),
                   const SizedBox(width: AppSpacing.md),
-                  if (_canAdd)
+
+                  if (_canAdd) ...[
+                    OutlinedButton.icon(
+                      onPressed: _openBulkImport,
+                      icon: const Icon(Icons.upload_file_rounded, size: 18),
+                      label: const Text('Bulk Import'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                        side: const BorderSide(color: AppColors.primary),
+                        foregroundColor: AppColors.primary,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppRadius.sm)),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
                     AppButton(
                       label: 'Add Medicine',
                       icon: Icons.add_rounded,
                       variant: AppButtonVariant.primary,
                       onPressed: _openAddDialog,
                     ),
+                  ],
                 ],
               ),
             ),
@@ -266,8 +303,7 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                               m.rackLocation.isEmpty
                                   ? '—'
                                   : m.rackLocation,
-                              style:
-                              AppTypography.tableCell.copyWith(
+                              style: AppTypography.tableCell.copyWith(
                                 fontWeight: FontWeight.bold,
                                 color: AppColors.primary,
                               ),

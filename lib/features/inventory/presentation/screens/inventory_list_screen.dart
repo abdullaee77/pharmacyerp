@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
+import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/widgets/components.dart';
 import '../../../../core/widgets/permission_gate.dart';
@@ -41,8 +41,9 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
       PermissionCategory.inventory, PermissionAction.adjust);
 
   Future<void> _openAdjustDialog(InventoryStock stock) async {
-    final error = await showDialog<String>(
+    final result = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => AdjustStockDialog(
         controller: widget.controller,
         stock: stock,
@@ -51,10 +52,11 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
       ),
     );
 
-    if (error != null && mounted) {
-      AppToast.error(context, error);
-    } else if (error == null && mounted) {
-      AppToast.success(context, 'Stock level adjusted successfully.');
+    if (!mounted) return;
+
+    // true = saved; null or false = cancelled — do NOT toast success on cancel
+    if (result == true) {
+      AppToast.success(context, 'Batch stock level adjusted successfully.');
     }
   }
 
@@ -89,7 +91,7 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                     Text('Inventory Management',
                         style: AppTypography.pageTitle),
                     Text(
-                      'Live stock balance sheet and adjustment controls.',
+                      'Live stock balance sheet and batch adjustment controls.',
                       style: AppTypography.bodySmall,
                     ),
                   ],

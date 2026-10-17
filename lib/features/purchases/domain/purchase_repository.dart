@@ -4,7 +4,12 @@ import 'purchase_return.dart';
 
 abstract class PurchaseRepository {
   // Purchases
-  Future<Result<Purchase>> createPurchase(Purchase purchase);
+  Future<Result<Purchase>> createPurchase(
+      Purchase purchase, {
+        String? accountId,
+        int amountPaidPaisa = 0,
+      });
+
   Future<Result<List<Purchase>>> getPurchases({String? searchQuery});
   Future<Result<Purchase>> getPurchaseById(PurchaseId id);
 

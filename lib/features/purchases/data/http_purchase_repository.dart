@@ -14,7 +14,11 @@ class HttpPurchaseRepository implements PurchaseRepository {
   HttpPurchaseRepository({ApiClient? api}) : _api = api ?? ApiClient.instance;
 
   @override
-  Future<Result<Purchase>> createPurchase(Purchase p) async {
+  Future<Result<Purchase>> createPurchase(
+      Purchase p, {
+        String? accountId,
+        int amountPaidPaisa = 0,
+      }) async {
     try {
       final payload = {
         'purchase': {
@@ -28,18 +32,26 @@ class HttpPurchaseRepository implements PurchaseRepository {
           'created_at': p.createdAt.toIso8601String(),
           'updated_at': p.updatedAt.toIso8601String(),
         },
-        'items': p.items.map((item) => {
-          'id': item.id,
-          'medicine_id': item.medicineId.value,
-          'medicine_name': item.medicineName,
-          'batch_number': item.batchNumber,
-          'expiry_date': item.expiryDate.toIso8601String(),
-          'quantity': item.quantity,
-          'purchase_price': item.purchasePrice.paisa,
-          'selling_price': item.sellingPrice.paisa,
-          'line_total': item.lineTotal.paisa,
-        }).toList(),
+        'items': p.items
+            .map(
+              (item) => {
+            'id': item.id,
+            'medicine_id': item.medicineId.value,
+            'medicine_name': item.medicineName,
+            'batch_number': item.batchNumber,
+            'expiry_date': item.expiryDate.toIso8601String(),
+            'quantity': item.quantity,
+            'purchase_price': item.purchasePrice.paisa,
+            'mrp': item.mrp.paisa,
+            'selling_price': item.sellingPrice.paisa,
+            'line_total': item.lineTotal.paisa,
+          },
+        )
+            .toList(),
         'operatorName': 'LAN client profile',
+        // Optional ledger hints for server (ignored if API doesn't support yet)
+        'accountId': accountId,
+        'amountPaidPaisa': amountPaidPaisa,
       };
 
       final res = await _api.completePurchase(payload);
@@ -53,19 +65,32 @@ class HttpPurchaseRepository implements PurchaseRepository {
   }
 
   Future<List<PurchaseItem>> _loadItems(String purchaseId) async {
-    final res = await _api.query(table: 'purchase_items', where: 'purchase_id = ?', args: [purchaseId]);
+    final res = await _api.query(
+      table: 'purchase_items',
+      where: 'purchase_id = ?',
+      args: [purchaseId],
+    );
     return res.fold(
-      onSuccess: (rows) => rows.map((r) => PurchaseItem(
-        id: r['id'] as String,
-        medicineId: MedicineId(r['medicine_id'] as String),
-        medicineName: r['medicine_name'] as String,
-        batchNumber: r['batch_number'] as String,
-        expiryDate: DateTime.parse(r['expiry_date'] as String),
-        quantity: r['quantity'] as int,
-        purchasePrice: Money.fromPaisa(r['purchase_price'] as int),
-        sellingPrice: Money.fromPaisa(r['selling_price'] as int),
-        lineTotal: Money.fromPaisa(r['line_total'] as int),
-      )).toList(),
+      onSuccess: (rows) => rows
+          .map(
+            (r) => PurchaseItem(
+          id: r['id'] as String,
+          medicineId: MedicineId(r['medicine_id'] as String),
+          medicineName: r['medicine_name'] as String,
+          batchNumber: r['batch_number'] as String,
+          expiryDate: DateTime.parse(r['expiry_date'] as String),
+          quantity: r['quantity'] as int,
+          purchasePrice: Money.fromPaisa(r['purchase_price'] as int),
+          mrp: Money.fromPaisa(
+            (r['mrp'] as int?) ??
+                (r['mrp_paisa'] as int?) ??
+                (r['selling_price'] as int? ?? 0),
+          ),
+          sellingPrice: Money.fromPaisa(r['selling_price'] as int),
+          lineTotal: Money.fromPaisa(r['line_total'] as int),
+        ),
+      )
+          .toList(),
       onFailure: (_) => [],
     );
   }
@@ -87,8 +112,12 @@ class HttpPurchaseRepository implements PurchaseRepository {
 
   @override
   Future<Result<List<Purchase>>> getPurchases({String? searchQuery}) async {
-    final where = searchQuery != null && searchQuery.isNotEmpty ? 'invoice_number LIKE ? OR supplier_name LIKE ?' : null;
-    final args = searchQuery != null && searchQuery.isNotEmpty ? ['%$searchQuery%', '%$searchQuery%'] : null;
+    final where = searchQuery != null && searchQuery.isNotEmpty
+        ? 'invoice_number LIKE ? OR supplier_name LIKE ?'
+        : null;
+    final args = searchQuery != null && searchQuery.isNotEmpty
+        ? ['%$searchQuery%', '%$searchQuery%']
+        : null;
 
     final res = await _api.query(
       table: 'purchases',
@@ -112,10 +141,19 @@ class HttpPurchaseRepository implements PurchaseRepository {
 
   @override
   Future<Result<Purchase>> getPurchaseById(PurchaseId id) async {
-    final res = await _api.query(table: 'purchases', where: 'id = ?', args: [id.value], limit: 1);
+    final res = await _api.query(
+      table: 'purchases',
+      where: 'id = ?',
+      args: [id.value],
+      limit: 1,
+    );
     return res.fold(
       onSuccess: (rows) async {
-        if (rows.isEmpty) return const Failure(NotFoundFailure(message: 'Purchase record not found.'));
+        if (rows.isEmpty) {
+          return const Failure(
+            NotFoundFailure(message: 'Purchase record not found.'),
+          );
+        }
         final items = await _loadItems(id.value);
         return Success(_rowToPurchase(rows.first, items));
       },
@@ -138,15 +176,19 @@ class HttpPurchaseRepository implements PurchaseRepository {
           'operator_name': r.operatorName,
           'created_at': r.createdAt.toIso8601String(),
         },
-        'items': r.items.map((item) => {
-          'id': item.id,
-          'original_purchase_item_id': item.originalPurchaseItemId,
-          'medicine_id': item.medicineId.value,
-          'medicine_name': item.medicineName,
-          'batch_number': item.batchNumber,
-          'quantity': item.quantity,
-          'refund_amount': item.refundAmount.paisa,
-        }).toList(),
+        'items': r.items
+            .map(
+              (item) => {
+            'id': item.id,
+            'original_purchase_item_id': item.originalPurchaseItemId,
+            'medicine_id': item.medicineId.value,
+            'medicine_name': item.medicineName,
+            'batch_number': item.batchNumber,
+            'quantity': item.quantity,
+            'refund_amount': item.refundAmount.paisa,
+          },
+        )
+            .toList(),
         'accountId': null,
       };
 
@@ -156,40 +198,61 @@ class HttpPurchaseRepository implements PurchaseRepository {
         onFailure: (f) => Failure(f),
       );
     } catch (e) {
-      return Failure(ServerFailure(message: 'Failed to sync purchase return: $e'));
+      return Failure(
+        ServerFailure(message: 'Failed to sync purchase return: $e'),
+      );
     }
   }
 
   @override
-  Future<Result<List<PurchaseReturn>>> getReturnsForPurchase(PurchaseId id) async {
-    final res = await _api.query(table: 'purchase_returns', where: 'original_purchase_id = ?', args: [id.value]);
+  Future<Result<List<PurchaseReturn>>> getReturnsForPurchase(
+      PurchaseId id,
+      ) async {
+    final res = await _api.query(
+      table: 'purchase_returns',
+      where: 'original_purchase_id = ?',
+      args: [id.value],
+    );
     return res.fold(
       onSuccess: (rows) async {
         final list = <PurchaseReturn>[];
         for (final r in rows) {
-          final iRes = await _api.query(table: 'purchase_return_items', where: 'return_id = ?', args: [r['id']]);
+          final iRes = await _api.query(
+            table: 'purchase_return_items',
+            where: 'return_id = ?',
+            args: [r['id']],
+          );
           final items = iRes.valueOrNull ?? [];
 
-          list.add(PurchaseReturn(
-            id: PurchaseReturnId(r['id'] as String),
-            originalPurchaseId: id,
-            originalInvoiceNumber: r['original_invoice_number'] as String,
-            supplierName: r['supplier_name'] as String,
-            reason: PurchaseReturnReason.values.firstWhere((e) => e.name == r['reason']),
-            notes: r['notes'] as String?,
-            totalRefund: Money.fromPaisa(r['total_refund'] as int),
-            operatorName: r['operator_name'] as String,
-            createdAt: DateTime.parse(r['created_at'] as String),
-            items: items.map((ri) => PurchaseReturnItem(
-              id: ri['id'] as String,
-              originalPurchaseItemId: ri['original_purchase_item_id'] as String,
-              medicineId: MedicineId(ri['medicine_id'] as String),
-              medicineName: ri['medicine_name'] as String,
-              batchNumber: ri['batch_number'] as String,
-              quantity: ri['quantity'] as int,
-              refundAmount: Money.fromPaisa(ri['refund_amount'] as int),
-            )).toList(),
-          ));
+          list.add(
+            PurchaseReturn(
+              id: PurchaseReturnId(r['id'] as String),
+              originalPurchaseId: id,
+              originalInvoiceNumber: r['original_invoice_number'] as String,
+              supplierName: r['supplier_name'] as String,
+              reason: PurchaseReturnReason.values.firstWhere(
+                    (e) => e.name == r['reason'],
+              ),
+              notes: r['notes'] as String?,
+              totalRefund: Money.fromPaisa(r['total_refund'] as int),
+              operatorName: r['operator_name'] as String,
+              createdAt: DateTime.parse(r['created_at'] as String),
+              items: items
+                  .map(
+                    (ri) => PurchaseReturnItem(
+                  id: ri['id'] as String,
+                  originalPurchaseItemId:
+                  ri['original_purchase_item_id'] as String,
+                  medicineId: MedicineId(ri['medicine_id'] as String),
+                  medicineName: ri['medicine_name'] as String,
+                  batchNumber: ri['batch_number'] as String,
+                  quantity: ri['quantity'] as int,
+                  refundAmount: Money.fromPaisa(ri['refund_amount'] as int),
+                ),
+              )
+                  .toList(),
+            ),
+          );
         }
         return Success(list);
       },
@@ -210,7 +273,9 @@ class HttpPurchaseRepository implements PurchaseRepository {
     return res.fold(
       onSuccess: (rows) {
         final map = <String, int>{};
-        for (final r in rows) map[r['item_id'] as String] = (r['qty'] as num).toInt();
+        for (final r in rows) {
+          map[r['item_id'] as String] = (r['qty'] as num).toInt();
+        }
         return Success(map);
       },
       onFailure: (f) => Failure(f),

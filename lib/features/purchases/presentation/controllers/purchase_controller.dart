@@ -70,8 +70,16 @@ class PurchaseController extends ChangeNotifier {
     loadPurchases();
   }
 
-  Future<String?> receivePurchase(Purchase purchase) async {
-    final result = await _receive.execute(purchase);
+  Future<String?> receivePurchase(
+      Purchase purchase, {
+        String? accountId,
+        int amountPaidPaisa = 0,
+      }) async {
+    final result = await _receive.execute(
+      purchase,
+      accountId: accountId,
+      amountPaidPaisa: amountPaidPaisa,
+    );
     return result.fold(
       onSuccess: (_) {
         loadPurchases();

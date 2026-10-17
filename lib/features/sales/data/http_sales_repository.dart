@@ -16,7 +16,15 @@ class HttpSalesRepository implements SalesRepository {
   HttpSalesRepository({ApiClient? api}) : _api = api ?? ApiClient.instance;
 
   @override
-  Future<Result<Sale>> createSale({required Sale sale, required List<PaymentTender> tenders}) async {
+  Future<Result<Sale>> createSale({
+    required Sale sale,
+    required List<PaymentTender> tenders,
+    String? accountId,
+    int accountAmountPaisa = 0,
+  }) async {
+    // HTTP path syncs sale documents only.
+    // Ledger (financial_transactions) is written on the server/standalone DB
+    // by CompleteSaleUseCase / SaleTransaction — not here.
     try {
       await _api.insert(table: 'sales', data: {
         'id': sale.id.value,
@@ -50,7 +58,8 @@ class HttpSalesRepository implements SalesRepository {
 
       for (final tender in tenders) {
         await _api.insert(table: 'sale_payments', data: {
-          'id': 'pay_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(9999)}',
+          'id':
+          'pay_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(9999)}',
           'sale_id': sale.id.value,
           'method': tender.method.name,
           'amount': tender.amount.paisa,
@@ -64,9 +73,14 @@ class HttpSalesRepository implements SalesRepository {
   }
 
   Future<List<SaleItem>> _loadSaleItems(String saleId) async {
-    final res = await _api.query(table: 'sale_items', where: 'sale_id = ?', args: [saleId]);
+    final res = await _api.query(
+      table: 'sale_items',
+      where: 'sale_id = ?',
+      args: [saleId],
+    );
     return res.fold(
-      onSuccess: (rows) => rows.map((r) => SaleItem(
+      onSuccess: (rows) => rows
+          .map((r) => SaleItem(
         id: r['id'] as String,
         medicineId: MedicineId(r['medicine_id'] as String),
         medicineName: r['medicine_name'] as String,
@@ -77,7 +91,8 @@ class HttpSalesRepository implements SalesRepository {
         unitPrice: Money.fromPaisa(r['unit_price'] as int),
         discountPercent: r['discount_percent'] as int,
         lineTotal: Money.fromPaisa(r['line_total'] as int),
-      )).toList(),
+      ))
+          .toList(),
       onFailure: (_) => [],
     );
   }
@@ -94,13 +109,20 @@ class HttpSalesRepository implements SalesRepository {
       grandTotal: Money.fromPaisa(row['grand_total'] as int),
       amountReceived: Money.fromPaisa(row['amount_received'] as int),
       change: Money.fromPaisa(row['change_amount'] as int),
-      status: SaleStatus.values.firstWhere((e) => e.name == row['status'], orElse: () => SaleStatus.completed),
+      status: SaleStatus.values.firstWhere(
+            (e) => e.name == row['status'],
+        orElse: () => SaleStatus.completed,
+      ),
       createdAt: DateTime.parse(row['created_at'] as String),
     );
   }
 
   @override
-  Future<Result<List<Sale>>> getSales({String? searchQuery, DateTime? fromDate, DateTime? toDate}) async {
+  Future<Result<List<Sale>>> getSales({
+    String? searchQuery,
+    DateTime? fromDate,
+    DateTime? toDate,
+  }) async {
     final where = <String>[];
     final args = <dynamic>[];
 
@@ -139,10 +161,17 @@ class HttpSalesRepository implements SalesRepository {
 
   @override
   Future<Result<Sale>> getSaleById(SaleId id) async {
-    final res = await _api.query(table: 'sales', where: 'id = ?', args: [id.value], limit: 1);
+    final res = await _api.query(
+      table: 'sales',
+      where: 'id = ?',
+      args: [id.value],
+      limit: 1,
+    );
     return res.fold(
       onSuccess: (rows) async {
-        if (rows.isEmpty) return const Failure(NotFoundFailure(message: 'Sale not found.'));
+        if (rows.isEmpty) {
+          return const Failure(NotFoundFailure(message: 'Sale not found.'));
+        }
         final items = await _loadSaleItems(id.value);
         return Success(_rowToSale(rows.first, items));
       },
@@ -152,13 +181,24 @@ class HttpSalesRepository implements SalesRepository {
 
   @override
   Future<Result<List<PaymentTender>>> getPaymentsForSale(SaleId id) async {
-    final res = await _api.query(table: 'sale_payments', where: 'sale_id = ?', args: [id.value]);
+    final res = await _api.query(
+      table: 'sale_payments',
+      where: 'sale_id = ?',
+      args: [id.value],
+    );
     return res.fold(
-      onSuccess: (rows) => Success(rows.map((r) => PaymentTender(
-        method: PaymentMethod.values.firstWhere((e) => e.name == r['method'], orElse: () => PaymentMethod.cash),
-        amount: Money.fromPaisa(r['amount'] as int),
-        reference: r['reference'] as String?,
-      )).toList()),
+      onSuccess: (rows) => Success(
+        rows
+            .map((r) => PaymentTender(
+          method: PaymentMethod.values.firstWhere(
+                (e) => e.name == r['method'],
+            orElse: () => PaymentMethod.cash,
+          ),
+          amount: Money.fromPaisa(r['amount'] as int),
+          reference: r['reference'] as String?,
+        ))
+            .toList(),
+      ),
       onFailure: (f) => Failure(f),
     );
   }
@@ -182,7 +222,8 @@ class HttpSalesRepository implements SalesRepository {
           'operator_name': r.operatorName,
           'created_at': r.createdAt.toIso8601String(),
         },
-        'items': r.items.map((item) => {
+        'items': r.items
+            .map((item) => {
           'id': item.id,
           'original_sale_item_id': item.originalSaleItemId,
           'medicine_id': item.medicineId.value,
@@ -191,7 +232,8 @@ class HttpSalesRepository implements SalesRepository {
           'batch_number': item.batchNumber,
           'quantity': item.quantity,
           'refund_amount': item.refundAmount.paisa,
-        }).toList(),
+        })
+            .toList(),
         'restockItems': restock,
         'accountId': null,
       };
@@ -208,24 +250,37 @@ class HttpSalesRepository implements SalesRepository {
 
   @override
   Future<Result<List<SalesReturn>>> getReturnsForSale(SaleId id) async {
-    final res = await _api.query(table: 'sales_returns', where: 'original_sale_id = ?', args: [id.value], orderBy: 'created_at DESC');
+    final res = await _api.query(
+      table: 'sales_returns',
+      where: 'original_sale_id = ?',
+      args: [id.value],
+      orderBy: 'created_at DESC',
+    );
     return res.fold(
       onSuccess: (rows) async {
         final list = <SalesReturn>[];
         for (final row in rows) {
-          final iRes = await _api.query(table: 'sales_return_items', where: 'return_id = ?', args: [row['id']]);
+          final iRes = await _api.query(
+            table: 'sales_return_items',
+            where: 'return_id = ?',
+            args: [row['id']],
+          );
           final items = iRes.valueOrNull ?? [];
 
           list.add(SalesReturn(
             id: SalesReturnId(row['id'] as String),
             originalSaleId: id,
             originalInvoiceNumber: row['original_invoice_number'] as String,
-            reason: SalesReturnReason.values.firstWhere((e) => e.name == row['reason'], orElse: () => SalesReturnReason.other),
+            reason: SalesReturnReason.values.firstWhere(
+                  (e) => e.name == row['reason'],
+              orElse: () => SalesReturnReason.other,
+            ),
             notes: row['notes'] as String?,
             totalRefund: Money.fromPaisa(row['total_refund'] as int),
             operatorName: row['operator_name'] as String,
             createdAt: DateTime.parse(row['created_at'] as String),
-            items: items.map((ri) => SalesReturnItem(
+            items: items
+                .map((ri) => SalesReturnItem(
               id: ri['id'] as String,
               originalSaleItemId: ri['original_sale_item_id'] as String,
               medicineId: MedicineId(ri['medicine_id'] as String),
@@ -234,7 +289,8 @@ class HttpSalesRepository implements SalesRepository {
               batchNumber: ri['batch_number'] as String,
               quantity: ri['quantity'] as int,
               refundAmount: Money.fromPaisa(ri['refund_amount'] as int),
-            )).toList(),
+            ))
+                .toList(),
           ));
         }
         return Success(list);

@@ -45,11 +45,15 @@ class SalesController extends ChangeNotifier {
     required Sale sale,
     required List<PaymentTender> tenders,
     String? customerPhone,
+    String? accountId,
+    int accountAmountPaisa = 0,
   }) async {
     final result = await _completeSale.execute(
       sale: sale,
       tenders: tenders,
       customerPhone: customerPhone,
+      accountId: accountId,
+      accountAmountPaisa: accountAmountPaisa,
     );
     return result.fold(
       onSuccess: (_) {
