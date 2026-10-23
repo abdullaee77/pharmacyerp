@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:pharmacy/core/data/database_helper.dart';
 import 'package:pharmacy/core/services/app_event_bus.dart';
+import '../../../categories/data/sqlite_category_repository.dart';  // ← NEW
+import '../../../categories/domain/category_repository.dart';        // ← NEW
 import '../../../inventory/domain/batch.dart';
 import '../../domain/medicine.dart';
 import '../../domain/medicine_repository.dart';
@@ -10,6 +12,7 @@ import '../widgets/medicine_form_dialog.dart';
 class MedicineController extends ChangeNotifier {
   final MedicineRepository _repository;
   final DatabaseHelper _dbHelper;
+  late final CategoryRepository _categoryRepo;  // ← NEW
 
   StreamSubscription<AppEvent>? _eventSubscription;
 
@@ -18,6 +21,8 @@ class MedicineController extends ChangeNotifier {
     DatabaseHelper? dbHelper,
   })  : _repository = repository,
         _dbHelper = dbHelper ?? DatabaseHelper.instance {
+    _categoryRepo = SqliteCategoryRepository(dbHelper: _dbHelper);  // ← NEW
+
     _eventSubscription = AppEventBus.instance.stream.listen((event) {
       if (event == AppEvent.medicineUpdated ||
           event == AppEvent.purchaseCompleted ||
@@ -49,6 +54,8 @@ class MedicineController extends ChangeNotifier {
     }
 
     final result = await _repository.getMedicines();
+    await loadFilterOptions();
+
     result.fold(
       onSuccess: (data) {
         _medicines = data;
@@ -82,12 +89,26 @@ class MedicineController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── NEW: Sync category & manufacturer to master tables ────────────────
+
+  Future<void> _syncMasterData(Medicine medicine) async {
+    if (medicine.category.trim().isNotEmpty) {
+      await _categoryRepo.ensureCategoryByName(medicine.category);
+    }
+    if (medicine.manufacturer.trim().isNotEmpty) {
+      await _categoryRepo.ensureManufacturerByName(medicine.manufacturer);
+    }
+  }
+
+  // ─── BULK OPERATIONS ───────────────────────────────────────────────────
+
   Future<String> bulkCreateMedicines(List<Medicine> medicinesList) async {
     var ok = 0;
     var fail = 0;
     final errors = <String>[];
 
     for (final m in medicinesList) {
+      await _syncMasterData(m);  // ← NEW
       final result = await _repository.createMedicine(m);
       result.fold(
         onSuccess: (_) => ok++,
@@ -99,7 +120,6 @@ class MedicineController extends ChangeNotifier {
     }
 
     await loadMedicines();
-    await loadFilterOptions();
     AppEventBus.instance.fire(AppEvent.medicineUpdated);
 
     if (fail == 0) {
@@ -108,7 +128,23 @@ class MedicineController extends ChangeNotifier {
     return 'Imported $ok, failed $fail.\n${errors.take(3).join("\n")}';
   }
 
+  Future<String> bulkUpdateMedicines(List<Medicine> medicinesList) async {
+    var ok = 0;
+    for (final m in medicinesList) {
+      await _syncMasterData(m);  // ← NEW
+      final result = await _repository.updateMedicine(m);
+      if (result.isSuccess) ok++;
+    }
+    await loadMedicines();
+    AppEventBus.instance.fire(AppEvent.medicineUpdated);
+    return 'Successfully updated $ok medicines.';
+  }
+
+  // ─── SINGLE CREATE / UPDATE ────────────────────────────────────────────
+
   Future<String?> createMedicineWithStock(MedicineCreationResult result) async {
+    await _syncMasterData(result.medicine);  // ← NEW
+
     final medResult = await _repository.createMedicine(result.medicine);
     final errorMsg = medResult.fold(
       onSuccess: (_) => null,
@@ -184,6 +220,8 @@ class MedicineController extends ChangeNotifier {
   }
 
   Future<String?> createMedicine(Medicine medicine) async {
+    await _syncMasterData(medicine);  // ← NEW
+
     final result = await _repository.createMedicine(medicine);
     final errorMsg = result.fold(
       onSuccess: (_) => null,
@@ -196,6 +234,8 @@ class MedicineController extends ChangeNotifier {
   }
 
   Future<String?> updateMedicine(Medicine medicine) async {
+    await _syncMasterData(medicine);  // ← NEW
+
     final result = await _repository.updateMedicine(medicine);
     final errorMsg = result.fold(
       onSuccess: (_) => null,

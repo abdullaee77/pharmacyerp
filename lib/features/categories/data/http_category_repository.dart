@@ -159,4 +159,46 @@ class HttpCategoryRepository implements CategoryRepository {
       onFailure: (f) => Failure(f),
     );
   }
+  @override
+  Future<Result<Category>> ensureCategoryByName(String name) async {
+    final listRes = await getCategories();
+    return listRes.fold(
+      onSuccess: (list) async {
+        final match = list.where(
+              (c) => c.name.toLowerCase() == name.trim().toLowerCase(),
+        );
+        if (match.isNotEmpty) return Success(match.first);
+        final newCat = Category(
+          id: CategoryId.generate(),
+          name: name.trim(),
+          description: '',
+          createdAt: DateTime.now(),
+        );
+        return createCategory(newCat);
+      },
+      onFailure: (f) => Failure(f),
+    );
+  }
+
+  @override
+  Future<Result<Manufacturer>> ensureManufacturerByName(String name) async {
+    final listRes = await getManufacturers();
+    return listRes.fold(
+      onSuccess: (list) async {
+        final match = list.where(
+              (m) => m.name.toLowerCase() == name.trim().toLowerCase(),
+        );
+        if (match.isNotEmpty) return Success(match.first);
+        final newMfr = Manufacturer(
+          id: ManufacturerId.generate(),
+          name: name.trim(),
+          contact: '',
+          address: '',
+          createdAt: DateTime.now(),
+        );
+        return createManufacturer(newMfr);
+      },
+      onFailure: (f) => Failure(f),
+    );
+  }
 }

@@ -28,6 +28,7 @@ class MedicineListScreen extends StatefulWidget {
 
 class _MedicineListScreenState extends State<MedicineListScreen> {
   String? _selectedCategory;
+  final Set<String> _selectedIds = {};
 
   @override
   void initState() {
@@ -46,6 +47,8 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
       PermissionCategory.medicines, PermissionAction.delete);
 
   Future<void> _openAddDialog() async {
+    await widget.controller.loadFilterOptions();
+
     final result = await showDialog<MedicineCreationResult>(
       context: context,
       barrierDismissible: false,
@@ -90,7 +93,82 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
     );
   }
 
+  Future<void> _openBulkEditDialog(List<Medicine> selectedMeds) async {
+    String? newCategory;
+    String? newRack;
+    String? newManufacturer;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Bulk Edit ${selectedMeds.length} Medicines'),
+        content: SizedBox(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Leave a field blank to keep the original value.',
+                style: AppTypography.caption,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              DropdownButtonFormField<String>(
+                decoration: const InputDecoration(labelText: 'Change Category'),
+                value: newCategory,
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('No Change')),
+                  ...widget.controller.categories.map((c) => DropdownMenuItem(value: c, child: Text(c))),
+                ],
+                onChanged: (v) => newCategory = v,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              DropdownButtonFormField<String>(
+                decoration: const InputDecoration(labelText: 'Change Manufacturer'),
+                value: newManufacturer,
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('No Change')),
+                  ...widget.controller.manufacturers.map((c) => DropdownMenuItem(value: c, child: Text(c))),
+                ],
+                onChanged: (v) => newManufacturer = v,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AppTextField(
+                label: 'Change Rack Location',
+                hint: 'e.g., A-1 (Leave blank to keep original)',
+                onChanged: (v) => newRack = v.trim().isEmpty ? null : v.trim(),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Apply Changes')),
+        ],
+      ),
+    );
+
+    if (result == true && mounted) {
+      if (newCategory == null && newRack == null && newManufacturer == null) return;
+
+      final updatedList = selectedMeds.map((m) {
+        return m.copyWith(
+          category: newCategory ?? m.category,
+          rackLocation: newRack ?? m.rackLocation,
+          manufacturer: newManufacturer ?? m.manufacturer,
+          updatedAt: DateTime.now(),
+        );
+      }).toList();
+
+      final msg = await widget.controller.bulkUpdateMedicines(updatedList);
+      if (!mounted) return;
+      setState(() => _selectedIds.clear());
+      AppToast.success(context, msg);
+    }
+  }
+
   Future<void> _openEditDialog(Medicine m) async {
+    await widget.controller.loadFilterOptions();
+
     final result = await showDialog<MedicineCreationResult>(
       context: context,
       barrierDismissible: false,
@@ -145,11 +223,12 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
               m.manufacturer.toLowerCase().contains(ctrl.filter.toLowerCase());
 
           final matchesCategory = _selectedCategory == null ||
-              _selectedCategory!.isEmpty ||
               m.category == _selectedCategory;
 
           return matchesQuery && matchesCategory;
         }).toList();
+
+        final selectedMeds = filtered.where((m) => _selectedIds.contains(m.id.value)).toList();
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -173,7 +252,7 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     flex: 2,
-                    child: DropdownButtonFormField<String>(
+                    child: DropdownButtonFormField<String?>(
                       value: _selectedCategory,
                       decoration: InputDecoration(
                         labelText: 'Filter by Category',
@@ -181,25 +260,39 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 8),
                         border: OutlineInputBorder(
-                            borderRadius:
-                            BorderRadius.circular(AppRadius.sm)),
+                            borderRadius: BorderRadius.circular(AppRadius.sm)),
                       ),
                       items: [
-                        const DropdownMenuItem(
-                            value: '', child: Text('All Categories')),
+                        const DropdownMenuItem(value: null, child: Text('All Categories')),
                         ...ctrl.categories.map((cat) => DropdownMenuItem(
                           value: cat,
-                          child: Text(cat),
+                          child: Text(cat.isEmpty ? 'Uncategorized' : cat),
                         )),
                       ],
                       onChanged: (v) {
                         setState(() {
-                          _selectedCategory = v == '' ? null : v;
+                          _selectedCategory = v;
+                          _selectedIds.clear();
                         });
                       },
                     ),
                   ),
                   const SizedBox(width: AppSpacing.md),
+
+                  if (_canEdit && _selectedIds.isNotEmpty) ...[
+                    OutlinedButton.icon(
+                      onPressed: () => _openBulkEditDialog(selectedMeds),
+                      icon: const Icon(Icons.edit_note_rounded, size: 18),
+                      label: Text('Edit (${_selectedIds.length})'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        side: const BorderSide(color: AppColors.primary),
+                        foregroundColor: AppColors.primary,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                  ],
 
                   if (_canAdd) ...[
                     OutlinedButton.icon(
@@ -235,7 +328,7 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                   ? const AppEmptyState(
                 icon: Icons.medication_rounded,
                 title: 'No medicines found',
-                subtitle: 'Create a new medicine to get started.',
+                subtitle: 'Adjust filters or create a new medicine.',
               )
                   : Container(
                 decoration: BoxDecoration(
@@ -246,63 +339,65 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                 clipBehavior: Clip.antiAlias,
                 child: SingleChildScrollView(
                   child: DataTable(
+                    showCheckboxColumn: true,
                     headingRowHeight: 44,
                     dataRowMinHeight: 48,
                     dataRowMaxHeight: 56,
                     horizontalMargin: AppSpacing.lg,
                     columnSpacing: AppSpacing.lg,
-                    headingRowColor: WidgetStatePropertyAll(
-                        AppColors.surfaceVariant),
+                    headingRowColor: WidgetStatePropertyAll(AppColors.surfaceVariant),
+                    onSelectAll: (val) {
+                      setState(() {
+                        if (val == true) {
+                          _selectedIds.addAll(filtered.map((m) => m.id.value));
+                        } else {
+                          _selectedIds.clear();
+                        }
+                      });
+                    },
                     columns: const [
                       DataColumn(label: Text('Medicine Name')),
                       DataColumn(label: Text('Category')),
                       DataColumn(label: Text('Company')),
-                      DataColumn(
-                          label: Text('Retail Price (PKR)'),
-                          numeric: true),
-                      DataColumn(
-                          label: Text('Box Size'), numeric: true),
+                      DataColumn(label: Text('Retail Price (PKR)'), numeric: true),
+                      DataColumn(label: Text('Box Size'), numeric: true),
                       DataColumn(label: Text('Rack')),
                       DataColumn(label: Text('Actions')),
                     ],
                     rows: filtered.map((m) {
                       return DataRow(
+                        selected: _selectedIds.contains(m.id.value),
+                        onSelectChanged: (val) {
+                          setState(() {
+                            if (val == true) {
+                              _selectedIds.add(m.id.value);
+                            } else {
+                              _selectedIds.remove(m.id.value);
+                            }
+                          });
+                        },
                         cells: [
                           DataCell(
                             Column(
-                              crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                              mainAxisAlignment:
-                              MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Text(
                                   '${m.name} ${m.strength}',
-                                  style: AppTypography.subtitle
-                                      .copyWith(fontSize: 13),
+                                  style: AppTypography.subtitle.copyWith(fontSize: 13),
                                 ),
                                 if (m.genericName.isNotEmpty)
-                                  Text(m.genericName,
-                                      style: AppTypography.caption),
+                                  Text(m.genericName, style: AppTypography.caption),
                               ],
                             ),
                           ),
-                          DataCell(Text(
-                              m.category.isEmpty ? '—' : m.category,
-                              style: AppTypography.tableCell)),
-                          DataCell(Text(
-                              m.manufacturer.isEmpty
-                                  ? '—'
-                                  : m.manufacturer,
-                              style: AppTypography.tableCell)),
-                          DataCell(Text(m.sellingPrice.display,
-                              style: AppTypography.numeric)),
-                          DataCell(Text('${m.boxSize}s',
-                              style: AppTypography.numeric)),
+                          DataCell(Text(m.category.isEmpty ? '—' : m.category, style: AppTypography.tableCell)),
+                          DataCell(Text(m.manufacturer.isEmpty ? '—' : m.manufacturer, style: AppTypography.tableCell)),
+                          DataCell(Text(m.sellingPrice.display, style: AppTypography.numeric)),
+                          DataCell(Text('${m.boxSize}s', style: AppTypography.numeric)),
                           DataCell(
                             Text(
-                              m.rackLocation.isEmpty
-                                  ? '—'
-                                  : m.rackLocation,
+                              m.rackLocation.isEmpty ? '—' : m.rackLocation,
                               style: AppTypography.tableCell.copyWith(
                                 fontWeight: FontWeight.bold,
                                 color: AppColors.primary,
@@ -315,23 +410,15 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                               children: [
                                 if (_canEdit)
                                   IconButton(
-                                    icon: const Icon(
-                                        Icons.edit_outlined,
-                                        size: 16,
-                                        color: AppColors.primary),
+                                    icon: const Icon(Icons.edit_outlined, size: 16, color: AppColors.primary),
                                     splashRadius: 16,
-                                    onPressed: () =>
-                                        _openEditDialog(m),
+                                    onPressed: () => _openEditDialog(m),
                                   ),
                                 if (_canDelete)
                                   IconButton(
-                                    icon: const Icon(
-                                        Icons.delete_outline,
-                                        size: 16,
-                                        color: AppColors.error),
+                                    icon: const Icon(Icons.delete_outline, size: 16, color: AppColors.error),
                                     splashRadius: 16,
-                                    onPressed: () =>
-                                        _deleteMedicine(m),
+                                    onPressed: () => _deleteMedicine(m),
                                   ),
                               ],
                             ),

@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'package:csv/csv.dart';
-import 'package:excel/excel.dart' hide Border;
+import 'package:excel/excel.dart' hide Border, BorderStyle;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_radius.dart';
@@ -35,9 +36,21 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
   List<_ParsedRow> _rows = [];
   String? _fileName;
   bool _loading = false;
+  bool _previewingSample = false;
+  bool _isSampleLoaded = false;
+  bool _showFormatHelp = false;
   String? _error;
 
-  // Expected CSV/Excel headers (case-insensitive, flexible)
+  // Twin controllers for header/body horizontal scroll sync.
+  // A single shared ScrollController cannot be attached to two
+  // Scrollable widgets and auto-mirror drags — Flutter doesn't support
+  // that. Instead we listen to one and manually jumpTo() the other.
+  final ScrollController _headerHScroll = ScrollController();
+  final ScrollController _bodyHScroll = ScrollController();
+  bool _isSyncingScroll = false;
+
+  static const _sampleAssetPath = 'assets/templates/medicines_import.csv';
+
   static const _headers = [
     'name',
     'generic_name',
@@ -56,11 +69,140 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
     'prescription_required',
   ];
 
+  static const List<double> _columnWidths = [
+    150, // name
+    170, // generic_name
+    130, // manufacturer
+    100, // dosage_form
+    90, // strength
+    120, // category
+    70, // unit
+    110, // rack_location
+    110, // purchase_price
+    110, // selling_price
+    90, // mrp
+    80, // box_size
+    80, // min_stock
+    150, // barcode
+    150, // prescription_required
+  ];
+
+  static const double _rowNumColWidth = 48;
+  static const double _statusColWidth = 44;
+
+  bool get _isBusy => _loading || _previewingSample;
+  bool get _hasData => _rows.isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _bodyHScroll.addListener(_onBodyScroll);
+    _headerHScroll.addListener(_onHeaderScroll);
+  }
+
+  void _onBodyScroll() {
+    if (_isSyncingScroll) return;
+    if (!_headerHScroll.hasClients) return;
+    _isSyncingScroll = true;
+    _headerHScroll.jumpTo(
+      _bodyHScroll.offset.clamp(
+        _headerHScroll.position.minScrollExtent,
+        _headerHScroll.position.maxScrollExtent,
+      ),
+    );
+    _isSyncingScroll = false;
+  }
+
+  void _onHeaderScroll() {
+    if (_isSyncingScroll) return;
+    if (!_bodyHScroll.hasClients) return;
+    _isSyncingScroll = true;
+    _bodyHScroll.jumpTo(
+      _headerHScroll.offset.clamp(
+        _bodyHScroll.position.minScrollExtent,
+        _bodyHScroll.position.maxScrollExtent,
+      ),
+    );
+    _isSyncingScroll = false;
+  }
+
+  @override
+  void dispose() {
+    _headerHScroll.removeListener(_onHeaderScroll);
+    _bodyHScroll.removeListener(_onBodyScroll);
+    _headerHScroll.dispose();
+    _bodyHScroll.dispose();
+    super.dispose();
+  }
+
+  // ---------------------------------------------------------------------
+  // Shared parsing logic
+  // ---------------------------------------------------------------------
+  List<_ParsedRow> _parseTable(List<List<String>> table) {
+    if (table.isEmpty) return [];
+
+    final headerRow = table.first.map((e) => e.trim().toLowerCase()).toList();
+    final dataRows = table.skip(1).toList();
+
+    final parsed = <_ParsedRow>[];
+    for (var i = 0; i < dataRows.length; i++) {
+      final rowNum = i + 2;
+      final raw = <String, String>{};
+      for (var c = 0; c < headerRow.length && c < dataRows[i].length; c++) {
+        raw[headerRow[c]] = dataRows[i][c].trim();
+      }
+      if (raw.values.every((v) => v.isEmpty)) continue;
+
+      try {
+        final med = _buildMedicine(raw);
+        parsed.add(_ParsedRow.ok(rowNum, med, raw));
+      } catch (e) {
+        parsed.add(_ParsedRow.err(rowNum, e.toString(), raw));
+      }
+    }
+    return parsed;
+  }
+
+  Future<void> _previewSample() async {
+    setState(() {
+      _previewingSample = true;
+      _error = null;
+      _rows = [];
+    });
+
+    try {
+      final content = await rootBundle.loadString(_sampleAssetPath);
+      final raw = const CsvToListConverter(
+        eol: '\n',
+        shouldParseNumbers: false,
+      ).convert(content);
+      final table =
+      raw.map((r) => r.map((c) => (c ?? '').toString()).toList()).toList();
+
+      final parsed = _parseTable(table);
+
+      setState(() {
+        _fileName = 'Sample Medicines';
+        _rows = parsed;
+        _isSampleLoaded = true;
+        _previewingSample = false;
+      });
+    } catch (e) {
+      setState(() {
+        _previewingSample = false;
+        _error = 'Could not load sample data. Make sure '
+            '$_sampleAssetPath is declared under pubspec.yaml > flutter > '
+            'assets.';
+      });
+    }
+  }
+
   Future<void> _pickFile() async {
     setState(() {
       _loading = true;
       _error = null;
       _rows = [];
+      _isSampleLoaded = false;
     });
 
     try {
@@ -92,26 +234,7 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
         return;
       }
 
-      final headerRow =
-      table.first.map((e) => e.trim().toLowerCase()).toList();
-      final dataRows = table.skip(1).toList();
-
-      final parsed = <_ParsedRow>[];
-      for (var i = 0; i < dataRows.length; i++) {
-        final rowNum = i + 2; // +1 for header, +1 to make human-friendly
-        final raw = <String, String>{};
-        for (var c = 0; c < headerRow.length && c < dataRows[i].length; c++) {
-          raw[headerRow[c]] = dataRows[i][c].trim();
-        }
-        if (raw.values.every((v) => v.isEmpty)) continue; // skip blank line
-
-        try {
-          final med = _buildMedicine(raw);
-          parsed.add(_ParsedRow.ok(rowNum, med, raw));
-        } catch (e) {
-          parsed.add(_ParsedRow.err(rowNum, e.toString(), raw));
-        }
-      }
+      final parsed = _parseTable(table);
 
       setState(() {
         _rows = parsed;
@@ -123,6 +246,17 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
         _loading = false;
       });
     }
+  }
+
+  void _reset() {
+    setState(() {
+      _rows = [];
+      _fileName = null;
+      _isSampleLoaded = false;
+      _error = null;
+    });
+    if (_headerHScroll.hasClients) _headerHScroll.jumpTo(0);
+    if (_bodyHScroll.hasClients) _bodyHScroll.jumpTo(0);
   }
 
   Future<List<List<String>>> _readCsv(String path) async {
@@ -138,14 +272,35 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
 
   Future<List<List<String>>> _readExcel(String path) async {
     final bytes = await File(path).readAsBytes();
-    final excel = Excel.decodeBytes(bytes);
+
+    late final Excel excel;
+    try {
+      excel = Excel.decodeBytes(bytes);
+    } catch (e) {
+      throw 'This Excel file uses formatting (like Tables/AutoFilter) that '
+          'isn\'t supported. In Excel: select your data → "Table Design" tab '
+          '→ "Convert to Range" → save, then try again. Or save as CSV.';
+    }
+
     if (excel.tables.isEmpty) return [];
-    final sheet = excel.tables[excel.tables.keys.first]!;
+
+    Sheet? sheet;
+    for (final key in excel.tables.keys) {
+      final candidate = excel.tables[key];
+      if (candidate != null && candidate.rows.isNotEmpty) {
+        sheet = candidate;
+        break;
+      }
+    }
+    if (sheet == null) return [];
+
     final out = <List<String>>[];
     for (final row in sheet.rows) {
-      out.add(row
-          .map((c) => c?.value?.toString().trim() ?? '')
-          .toList());
+      out.add(row.map((c) {
+        final v = c?.value;
+        if (v == null) return '';
+        return v.toString().trim();
+      }).toList());
     }
     return out;
   }
@@ -218,244 +373,565 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
     final errCount = _rows.length - okCount;
 
     return Dialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 1000, maxHeight: 720),
+        constraints: const BoxConstraints(maxWidth: 1040, maxHeight: 720),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    AppColors.primary,
-                    AppColors.primary.withValues(alpha: 0.7),
-                  ],
-                ),
-                borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(AppRadius.lg)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.upload_file_rounded,
-                      color: Colors.white, size: 26),
-                  const SizedBox(width: AppSpacing.sm),
-                  Text(
-                    'Bulk Import Medicines',
-                    style: AppTypography.pageTitle
-                        .copyWith(color: Colors.white),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
-            ),
-
-            // Body
+            _buildHeader(),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildInstructions(),
-                    const SizedBox(height: AppSpacing.md),
-                    Row(
-                      children: [
-                        AppButton(
-                          label: 'Choose File (CSV / Excel)',
-                          icon: Icons.folder_open_rounded,
-                          variant: AppButtonVariant.primary,
-                          onPressed: _loading ? null : _pickFile,
-                        ),
-                        const SizedBox(width: AppSpacing.md),
-                        if (_fileName != null)
-                          Flexible(
-                            child: Text(
-                              _fileName!,
-                              style: AppTypography.body,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        const Spacer(),
-                        if (_rows.isNotEmpty) ...[
-                          _chip('$okCount OK', AppColors.success),
-                          const SizedBox(width: 8),
-                          if (errCount > 0)
-                            _chip('$errCount Error', AppColors.error),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    if (_error != null)
-                      Container(
-                        padding: const EdgeInsets.all(AppSpacing.sm),
-                        decoration: BoxDecoration(
-                          color: AppColors.error.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(AppRadius.sm),
-                        ),
-                        child: Text(_error!,
-                            style: AppTypography.body
-                                .copyWith(color: AppColors.error)),
-                      ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Expanded(child: _buildPreview()),
-                  ],
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  0,
                 ),
+                child: _isBusy
+                    ? const Center(child: CircularProgressIndicator())
+                    : _hasData
+                    ? _buildReviewState(okCount, errCount)
+                    : _buildUploadState(),
               ),
             ),
-
-            // Footer
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  AppButton(
-                    label: 'Cancel',
-                    variant: AppButtonVariant.ghost,
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  AppButton(
-                    label: 'Import $okCount Medicines',
-                    icon: Icons.check_circle_rounded,
-                    variant: AppButtonVariant.primary,
-                    onPressed: okCount > 0 ? _import : null,
-                  ),
-                ],
-              ),
-            ),
+            _buildFooter(okCount),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildInstructions() {
+  Widget _buildHeader() {
     return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.info.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        border: Border.all(color: AppColors.info.withValues(alpha: 0.3)),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius:
+        const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      child: Row(
         children: [
-          Row(
-            children: [
-              Icon(Icons.info_outline, size: 18, color: AppColors.info),
-              const SizedBox(width: 6),
-              Text('Required column: name. Other columns optional.',
-                  style: AppTypography.body
-                      .copyWith(fontWeight: FontWeight.w600)),
-            ],
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+            child: const Icon(Icons.upload_file_rounded,
+                color: Colors.white, size: 22),
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Headers (row 1): ${_headers.join(", ")}',
-            style: AppTypography.caption,
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Bulk Import Medicines',
+                  style: AppTypography.pageTitle
+                      .copyWith(color: Colors.white, fontSize: 18),
+                ),
+                Text(
+                  'Add many medicines at once from a CSV or Excel file',
+                  style: AppTypography.caption
+                      .copyWith(color: Colors.white.withValues(alpha: 0.8)),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, color: Colors.white),
+            onPressed: () => Navigator.of(context).pop(),
           ),
         ],
       ),
     );
   }
 
-  Widget _chip(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        border: Border.all(color: color),
-      ),
-      child: Text(text,
-          style: AppTypography.caption
-              .copyWith(color: color, fontWeight: FontWeight.w600)),
+  Widget _buildUploadState() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    onTap: _pickFile,
+                    borderRadius: BorderRadius.circular(AppRadius.lg),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.xl,
+                        horizontal: AppSpacing.lg,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(AppRadius.lg),
+                        border: Border.all(
+                          color: AppColors.primary.withValues(alpha: 0.35),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withValues(alpha: 0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(Icons.cloud_upload_rounded,
+                                size: 36, color: AppColors.primary),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            'Click to browse a file',
+                            style: AppTypography.body.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Supports .csv, .xlsx, .xls',
+                            style: AppTypography.caption
+                                .copyWith(color: AppColors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  Row(
+                    children: [
+                      Expanded(child: Divider(color: AppColors.border)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('or',
+                            style: AppTypography.caption
+                                .copyWith(color: AppColors.textSecondary)),
+                      ),
+                      Expanded(child: Divider(color: AppColors.border)),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  AppButton(
+                    label: 'Preview Sample Data',
+                    icon: Icons.auto_awesome_rounded,
+                    variant: AppButtonVariant.outlined,
+                    isFullWidth: true,
+                    onPressed: _previewSample,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'See example medicines before importing your own file',
+                    textAlign: TextAlign.center,
+                    style: AppTypography.caption
+                        .copyWith(color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (_error != null) _buildErrorBanner(),
+        _buildFormatHelpToggle(),
+      ],
     );
   }
 
-  Widget _buildPreview() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_rows.isEmpty) {
-      return Container(
-        decoration: BoxDecoration(
-          border: Border.all(color: AppColors.border),
-          borderRadius: BorderRadius.circular(AppRadius.sm),
+  Widget _buildReviewState(int okCount, int errCount) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(
+              _isSampleLoaded
+                  ? Icons.auto_awesome_rounded
+                  : Icons.description_rounded,
+              size: 18,
+              color: AppColors.textSecondary,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _fileName ?? '',
+                style: AppTypography.body.copyWith(fontWeight: FontWeight.w600),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            AppButton(
+              label: 'Start Over',
+              icon: Icons.restart_alt_rounded,
+              variant: AppButtonVariant.ghost,
+              size: AppButtonSize.small,
+              onPressed: _reset,
+            ),
+          ],
         ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+        const SizedBox(height: AppSpacing.md),
+        Row(
+          children: [
+            Expanded(
+              child: _statCard(
+                icon: Icons.format_list_numbered_rounded,
+                label: 'Total Rows',
+                value: '${_rows.length}',
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: _statCard(
+                icon: Icons.check_circle_rounded,
+                label: 'Ready to Import',
+                value: '$okCount',
+                color: AppColors.success,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: _statCard(
+                icon: Icons.error_rounded,
+                label: 'Errors (Skipped)',
+                value: '$errCount',
+                color: errCount > 0 ? AppColors.error : AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        if (_error != null) _buildErrorBanner(),
+        Expanded(child: _buildSpreadsheetTable()),
+        const SizedBox(height: AppSpacing.sm),
+        _buildFormatHelpToggle(),
+      ],
+    );
+  }
+
+  Widget _statCard({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: color),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.table_chart_outlined,
-                  size: 64, color: AppColors.textSecondary),
-              const SizedBox(height: AppSpacing.sm),
-              Text('No file selected',
-                  style: AppTypography.body
-                      .copyWith(color: AppColors.textSecondary)),
+              Text(
+                value,
+                style: AppTypography.pageTitle.copyWith(
+                  fontSize: 18,
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              Text(
+                label,
+                style: AppTypography.caption
+                    .copyWith(color: AppColors.textSecondary),
+              ),
             ],
           ),
-        ),
-      );
-    }
+        ],
+      ),
+    );
+  }
+
+  // -----------------------------------------------------------------------
+  // Excel/CSV-style grid preview with a header row that stays visually
+  // in sync with the body's horizontal scroll via twin ScrollControllers.
+  // -----------------------------------------------------------------------
+  Widget _buildSpreadsheetTable() {
+    final totalWidth = _rowNumColWidth +
+        _statusColWidth +
+        _columnWidths.fold<double>(0, (a, b) => a + b);
 
     return Container(
       decoration: BoxDecoration(
         border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(AppRadius.sm),
+        borderRadius: BorderRadius.circular(AppRadius.md),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SingleChildScrollView(
-          child: DataTable(
-            headingRowColor: WidgetStatePropertyAll(
-              AppColors.primary.withValues(alpha: 0.08),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          // Header row — not directly draggable (NeverScrollableScrollPhysics),
+          // but its controller is still jumped programmatically whenever the
+          // body below is dragged, via _onBodyScroll().
+          SingleChildScrollView(
+            controller: _headerHScroll,
+            scrollDirection: Axis.horizontal,
+            physics: const NeverScrollableScrollPhysics(),
+            child: SizedBox(
+              width: totalWidth,
+              child: _buildColumnNameRow(),
             ),
-            columns: const [
-              DataColumn(label: Text('Row')),
-              DataColumn(label: Text('Status')),
-              DataColumn(label: Text('Name')),
-              DataColumn(label: Text('Generic')),
-              DataColumn(label: Text('Manufacturer')),
-              DataColumn(label: Text('Strength')),
-              DataColumn(label: Text('Category')),
-              DataColumn(label: Text('Purchase')),
-              DataColumn(label: Text('Selling')),
-              DataColumn(label: Text('Error')),
-            ],
-            rows: _rows.map((r) {
-              final m = r.medicine;
-              return DataRow(cells: [
-                DataCell(Text('${r.rowNumber}')),
-                DataCell(r.isOk
-                    ? _chip('OK', AppColors.success)
-                    : _chip('ERR', AppColors.error)),
-                DataCell(Text(m?.name ?? r.raw['name'] ?? '')),
-                DataCell(Text(m?.genericName ?? '')),
-                DataCell(Text(m?.manufacturer ?? '')),
-                DataCell(Text(m?.strength ?? '')),
-                DataCell(Text(m?.category ?? '')),
-                DataCell(
-                    Text(m != null ? m.purchasePrice.pkr.toStringAsFixed(2) : '')),
-                DataCell(
-                    Text(m != null ? m.sellingPrice.pkr.toStringAsFixed(2) : '')),
-                DataCell(Text(
-                  r.error ?? '',
-                  style:
-                  AppTypography.caption.copyWith(color: AppColors.error),
-                )),
-              ]);
-            }).toList(),
+          ),
+          const Divider(height: 1, thickness: 1),
+          // Body — vertical scroll outer, horizontal scroll inner.
+          // Dragging here fires _onBodyScroll(), which mirrors the
+          // offset onto the header controller above.
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.vertical,
+              child: SingleChildScrollView(
+                controller: _bodyHScroll,
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: totalWidth,
+                  child: Column(
+                    children: List.generate(_rows.length, (index) {
+                      return _buildDataRow(_rows[index], index);
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildColumnNameRow() {
+    return Container(
+      color: AppColors.primary.withValues(alpha: 0.08),
+      child: Row(
+        children: [
+          _gridCell(
+            width: _rowNumColWidth,
+            child: Text('#',
+                textAlign: TextAlign.center,
+                style: AppTypography.caption
+                    .copyWith(fontWeight: FontWeight.w700)),
+          ),
+          _gridCell(
+            width: _statusColWidth,
+            child: Icon(Icons.flag_outlined,
+                size: 14, color: AppColors.textSecondary),
+          ),
+          for (var i = 0; i < _headers.length; i++)
+            _gridCell(
+              width: _columnWidths[i],
+              child: Text(
+                _headers[i],
+                style: AppTypography.caption.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDataRow(_ParsedRow r, int index) {
+    final isEven = index % 2 == 0;
+    final bg = !r.isOk
+        ? AppColors.error.withValues(alpha: 0.07)
+        : (isEven ? Colors.transparent : AppColors.border.withValues(alpha: 0.12));
+
+    return Container(
+      color: bg,
+      child: Row(
+        children: [
+          _gridCell(
+            width: _rowNumColWidth,
+            child: Text(
+              '${r.rowNumber}',
+              textAlign: TextAlign.center,
+              style: AppTypography.caption
+                  .copyWith(color: AppColors.textSecondary),
+            ),
+          ),
+          _gridCell(
+            width: _statusColWidth,
+            child: Center(
+              child: Tooltip(
+                message: r.isOk ? 'Row OK' : (r.error ?? 'Invalid row'),
+                child: Icon(
+                  r.isOk ? Icons.check_circle_rounded : Icons.error_rounded,
+                  size: 16,
+                  color: r.isOk ? AppColors.success : AppColors.error,
+                ),
+              ),
+            ),
+          ),
+          for (var i = 0; i < _headers.length; i++)
+            _gridCell(
+              width: _columnWidths[i],
+              child: Text(
+                r.raw[_headers[i]] ?? '',
+                style: AppTypography.body.copyWith(fontSize: 13),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _gridCell({required double width, required Widget child}) {
+    return Container(
+      width: width,
+      height: 36,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        border: Border(
+          right: BorderSide(color: AppColors.border.withValues(alpha: 0.6)),
+          bottom: BorderSide(color: AppColors.border.withValues(alpha: 0.4)),
+        ),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildErrorBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, size: 18, color: AppColors.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _error!,
+              style: AppTypography.body.copyWith(color: AppColors.error),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFormatHelpToggle() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _showFormatHelp = !_showFormatHelp),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.help_outline_rounded,
+                    size: 16, color: AppColors.textSecondary),
+                const SizedBox(width: 6),
+                Text(
+                  _showFormatHelp
+                      ? 'Hide required format'
+                      : 'View required column format',
+                  style: AppTypography.caption
+                      .copyWith(color: AppColors.textSecondary),
+                ),
+                Icon(
+                  _showFormatHelp
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  size: 16,
+                  color: AppColors.textSecondary,
+                ),
+              ],
+            ),
           ),
         ),
+        if (_showFormatHelp)
+          Container(
+            margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppColors.info.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              border: Border.all(color: AppColors.info.withValues(alpha: 0.25)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Only "name" is required — every other column is optional.',
+                  style: AppTypography.body
+                      .copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _headers.join(', '),
+                  style: AppTypography.caption
+                      .copyWith(color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Excel tip: avoid "Format as Table" (Ctrl+T) — convert to '
+                      'a normal range before saving, or just use CSV.',
+                  style: AppTypography.caption
+                      .copyWith(color: AppColors.textSecondary),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildFooter(int okCount) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          AppButton(
+            label: 'Cancel',
+            variant: AppButtonVariant.ghost,
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          AppButton(
+            label: _hasData
+                ? 'Import $okCount Medicine${okCount == 1 ? '' : 's'}'
+                : 'Import',
+            icon: Icons.check_circle_rounded,
+            variant: AppButtonVariant.primary,
+            onPressed: okCount > 0 ? _import : null,
+          ),
+        ],
       ),
     );
   }

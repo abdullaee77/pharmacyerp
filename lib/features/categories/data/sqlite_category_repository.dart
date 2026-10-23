@@ -14,7 +14,7 @@ class SqliteCategoryRepository implements CategoryRepository {
 
   Future<Database> get _db => _dbHelper.database;
 
-  // ─── CATEGORIES ─────────────────────────────────────────────
+  // ─── CATEGORIES ───────────────────────────────────────────────────────────
 
   @override
   Future<Result<List<Category>>> getCategories({String? searchQuery}) async {
@@ -70,14 +70,13 @@ class SqliteCategoryRepository implements CategoryRepository {
       final db = await _db;
       final rows = await db.update(
         'categories',
-        {
-          'name': c.name,
-          'description': c.description,
-        },
+        {'name': c.name, 'description': c.description},
         where: 'id = ?',
         whereArgs: [c.id.value],
       );
-      if (rows == 0) return const Failure(NotFoundFailure(message: 'Category not found.'));
+      if (rows == 0) {
+        return const Failure(NotFoundFailure(message: 'Category not found.'));
+      }
       return Success(c);
     } catch (e) {
       return Failure(DatabaseFailure(message: 'Failed to update category: $e'));
@@ -88,15 +87,66 @@ class SqliteCategoryRepository implements CategoryRepository {
   Future<Result<void>> deleteCategory(CategoryId id) async {
     try {
       final db = await _db;
-      final rows = await db.delete('categories', where: 'id = ?', whereArgs: [id.value]);
-      if (rows == 0) return const Failure(NotFoundFailure(message: 'Category not found.'));
+      final rows = await db.delete(
+        'categories',
+        where: 'id = ?',
+        whereArgs: [id.value],
+      );
+      if (rows == 0) {
+        return const Failure(NotFoundFailure(message: 'Category not found.'));
+      }
       return const Success(null);
     } catch (e) {
       return Failure(DatabaseFailure(message: 'Failed to delete category: $e'));
     }
   }
 
-  // ─── MANUFACTURERS ──────────────────────────────────────────
+  @override
+  Future<Result<Category>> ensureCategoryByName(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return const Failure(ValidationFailure(message: 'Category name is empty.'));
+    }
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'categories',
+        where: 'LOWER(name) = ?',
+        whereArgs: [trimmed.toLowerCase()],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        final r = rows.first;
+        return Success(Category(
+          id: CategoryId(r['id'] as String),
+          name: r['name'] as String,
+          description: r['description'] as String? ?? '',
+          createdAt: DateTime.parse(r['created_at'] as String),
+        ));
+      }
+      final newCat = Category(
+        id: CategoryId.generate(),
+        name: trimmed,
+        description: '',
+        createdAt: DateTime.now(),
+      );
+      await db.insert(
+        'categories',
+        {
+          'id': newCat.id.value,
+          'name': newCat.name,
+          'description': newCat.description,
+          'created_at': newCat.createdAt.toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      return Success(newCat);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to ensure category: $e'));
+    }
+  }
+
+  // ─── MANUFACTURERS ────────────────────────────────────────────────────────
 
   @override
   Future<Result<List<Manufacturer>>> getManufacturers({String? searchQuery}) async {
@@ -154,15 +204,13 @@ class SqliteCategoryRepository implements CategoryRepository {
       final db = await _db;
       final rows = await db.update(
         'manufacturers',
-        {
-          'name': m.name,
-          'contact': m.contact,
-          'address': m.address,
-        },
+        {'name': m.name, 'contact': m.contact, 'address': m.address},
         where: 'id = ?',
         whereArgs: [m.id.value],
       );
-      if (rows == 0) return const Failure(NotFoundFailure(message: 'Manufacturer not found.'));
+      if (rows == 0) {
+        return const Failure(NotFoundFailure(message: 'Manufacturer not found.'));
+      }
       return Success(m);
     } catch (e) {
       return Failure(DatabaseFailure(message: 'Failed to update manufacturer: $e'));
@@ -173,11 +221,65 @@ class SqliteCategoryRepository implements CategoryRepository {
   Future<Result<void>> deleteManufacturer(ManufacturerId id) async {
     try {
       final db = await _db;
-      final rows = await db.delete('manufacturers', where: 'id = ?', whereArgs: [id.value]);
-      if (rows == 0) return const Failure(NotFoundFailure(message: 'Manufacturer not found.'));
+      final rows = await db.delete(
+        'manufacturers',
+        where: 'id = ?',
+        whereArgs: [id.value],
+      );
+      if (rows == 0) {
+        return const Failure(NotFoundFailure(message: 'Manufacturer not found.'));
+      }
       return const Success(null);
     } catch (e) {
       return Failure(DatabaseFailure(message: 'Failed to delete manufacturer: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Manufacturer>> ensureManufacturerByName(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return const Failure(ValidationFailure(message: 'Manufacturer name is empty.'));
+    }
+    try {
+      final db = await _db;
+      final rows = await db.query(
+        'manufacturers',
+        where: 'LOWER(name) = ?',
+        whereArgs: [trimmed.toLowerCase()],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        final r = rows.first;
+        return Success(Manufacturer(
+          id: ManufacturerId(r['id'] as String),
+          name: r['name'] as String,
+          contact: r['contact'] as String? ?? '',
+          address: r['address'] as String? ?? '',
+          createdAt: DateTime.parse(r['created_at'] as String),
+        ));
+      }
+      final newMfr = Manufacturer(
+        id: ManufacturerId.generate(),
+        name: trimmed,
+        contact: '',
+        address: '',
+        createdAt: DateTime.now(),
+      );
+      await db.insert(
+        'manufacturers',
+        {
+          'id': newMfr.id.value,
+          'name': newMfr.name,
+          'contact': newMfr.contact,
+          'address': newMfr.address,
+          'created_at': newMfr.createdAt.toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      return Success(newMfr);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to ensure manufacturer: $e'));
     }
   }
 }

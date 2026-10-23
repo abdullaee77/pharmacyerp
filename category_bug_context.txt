@@ -1,0 +1,2488 @@
+﻿========== FILE: lib/features/categories/data/sqlite_category_repository.dart ==========
+import 'package:sqflite/sqflite.dart';
+import '../../../core/data/database_helper.dart';
+import '../../../core/error/failures.dart';
+import '../../../core/result/result.dart';
+import '../domain/category.dart';
+import '../domain/manufacturer.dart';
+import '../domain/category_repository.dart';
+
+class SqliteCategoryRepository implements CategoryRepository {
+  final DatabaseHelper _dbHelper;
+
+  SqliteCategoryRepository({DatabaseHelper? dbHelper})
+      : _dbHelper = dbHelper ?? DatabaseHelper.instance;
+
+  Future<Database> get _db => _dbHelper.database;
+
+  // â”€â”€â”€ CATEGORIES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  @override
+  Future<Result<List<Category>>> getCategories({String? searchQuery}) async {
+    try {
+      final db = await _db;
+      String? where;
+      List<dynamic>? args;
+
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        where = 'name LIKE ? OR description LIKE ?';
+        args = ['%$searchQuery%', '%$searchQuery%'];
+      }
+
+      final rows = await db.query(
+        'categories',
+        where: where,
+        whereArgs: args,
+        orderBy: 'name ASC',
+      );
+
+      final list = rows.map((r) => Category(
+        id: CategoryId(r['id'] as String),
+        name: r['name'] as String,
+        description: r['description'] as String? ?? '',
+        createdAt: DateTime.parse(r['created_at'] as String),
+      )).toList();
+
+      return Success(list);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load categories: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Category>> createCategory(Category c) async {
+    try {
+      final db = await _db;
+      await db.insert('categories', {
+        'id': c.id.value,
+        'name': c.name,
+        'description': c.description,
+        'created_at': c.createdAt.toIso8601String(),
+      });
+      return Success(c);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to save category: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Category>> updateCategory(Category c) async {
+    try {
+      final db = await _db;
+      final rows = await db.update(
+        'categories',
+        {
+          'name': c.name,
+          'description': c.description,
+        },
+        where: 'id = ?',
+        whereArgs: [c.id.value],
+      );
+      if (rows == 0) return const Failure(NotFoundFailure(message: 'Category not found.'));
+      return Success(c);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to update category: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> deleteCategory(CategoryId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.delete('categories', where: 'id = ?', whereArgs: [id.value]);
+      if (rows == 0) return const Failure(NotFoundFailure(message: 'Category not found.'));
+      return const Success(null);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to delete category: $e'));
+    }
+  }
+
+  // â”€â”€â”€ MANUFACTURERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  @override
+  Future<Result<List<Manufacturer>>> getManufacturers({String? searchQuery}) async {
+    try {
+      final db = await _db;
+      String? where;
+      List<dynamic>? args;
+
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        where = 'name LIKE ? OR contact LIKE ?';
+        args = ['%$searchQuery%', '%$searchQuery%'];
+      }
+
+      final rows = await db.query(
+        'manufacturers',
+        where: where,
+        whereArgs: args,
+        orderBy: 'name ASC',
+      );
+
+      final list = rows.map((r) => Manufacturer(
+        id: ManufacturerId(r['id'] as String),
+        name: r['name'] as String,
+        contact: r['contact'] as String? ?? '',
+        address: r['address'] as String? ?? '',
+        createdAt: DateTime.parse(r['created_at'] as String),
+      )).toList();
+
+      return Success(list);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to load manufacturers: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Manufacturer>> createManufacturer(Manufacturer m) async {
+    try {
+      final db = await _db;
+      await db.insert('manufacturers', {
+        'id': m.id.value,
+        'name': m.name,
+        'contact': m.contact,
+        'address': m.address,
+        'created_at': m.createdAt.toIso8601String(),
+      });
+      return Success(m);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to save manufacturer: $e'));
+    }
+  }
+
+  @override
+  Future<Result<Manufacturer>> updateManufacturer(Manufacturer m) async {
+    try {
+      final db = await _db;
+      final rows = await db.update(
+        'manufacturers',
+        {
+          'name': m.name,
+          'contact': m.contact,
+          'address': m.address,
+        },
+        where: 'id = ?',
+        whereArgs: [m.id.value],
+      );
+      if (rows == 0) return const Failure(NotFoundFailure(message: 'Manufacturer not found.'));
+      return Success(m);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to update manufacturer: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> deleteManufacturer(ManufacturerId id) async {
+    try {
+      final db = await _db;
+      final rows = await db.delete('manufacturers', where: 'id = ?', whereArgs: [id.value]);
+      if (rows == 0) return const Failure(NotFoundFailure(message: 'Manufacturer not found.'));
+      return const Success(null);
+    } catch (e) {
+      return Failure(DatabaseFailure(message: 'Failed to delete manufacturer: $e'));
+    }
+  }
+}
+
+========== FILE: lib/features/medicines/presentation/widgets/medicine_form_dialog.dart ==========
+import 'package:flutter/material.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/theme/app_radius.dart';
+import '../../../../core/theme/app_typography.dart';
+import '../../../../core/widgets/components.dart';
+import '../../domain/medicine.dart';
+import '../../domain/value_objects.dart';
+
+class OpeningStockInfo {
+  final String batchNumber;
+  final DateTime expiryDate;
+  final int quantity;
+
+  const OpeningStockInfo({
+    required this.batchNumber,
+    required this.expiryDate,
+    required this.quantity,
+  });
+}
+
+class MedicineCreationResult {
+  final Medicine medicine;
+  final OpeningStockInfo? openingStock;
+
+  const MedicineCreationResult({
+    required this.medicine,
+    this.openingStock,
+  });
+}
+
+class MedicineFormDialog extends StatefulWidget {
+  final Medicine? medicine;
+  final List<String> existingCategories;
+  final List<String> existingManufacturers;
+
+  const MedicineFormDialog({
+    super.key,
+    this.medicine,
+    this.existingCategories = const [],
+    this.existingManufacturers = const [],
+  });
+
+  @override
+  State<MedicineFormDialog> createState() => _MedicineFormDialogState();
+}
+
+class _MedicineFormDialogState extends State<MedicineFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+
+  // Basic Info
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _genericCtrl;
+  late final TextEditingController _strengthCtrl;
+  late final TextEditingController _categoryCtrl;
+  late final TextEditingController _manufacturerCtrl;
+  late final TextEditingController _barcodeCtrl;
+
+  // Category & Manufacturer Selection Mode
+  late String? _selectedCategoryDropdown;
+  late bool _isCustomCategory;
+  late String? _selectedManufacturerDropdown;
+  late bool _isCustomManufacturer;
+
+  // Classification
+  late DosageForm _dosageForm;
+  late DrugSchedule _drugSchedule;
+  late bool _prescriptionRequired;
+  late MedicineStatus _status;
+
+  // Pricing & Stock Thresholds
+  late final TextEditingController _purchasePriceCtrl;
+  late final TextEditingController _sellingPriceCtrl;
+  late final TextEditingController _mrpCtrl;
+  late final TextEditingController _boxSizeCtrl;
+  late final TextEditingController _boxPriceCtrl;
+  late final TextEditingController _minStockCtrl;
+  late String _unit;
+
+  // Storage
+  late final TextEditingController _rackCtrl;
+  late final TextEditingController _storageCtrl;
+
+  bool get _isEditing => widget.medicine != null;
+
+  static const _units = [
+    'Tab',
+    'Cap',
+    'ml',
+    'mg',
+    'g',
+    'Sachet',
+    'Tube',
+    'Bottle',
+    'Box',
+    'Piece',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    final m = widget.medicine;
+    final initialCat = m?.category ?? '';
+    final initialMfr = m?.manufacturer ?? '';
+
+    _nameCtrl = TextEditingController(text: m?.name ?? '');
+    _genericCtrl = TextEditingController(text: m?.genericName ?? '');
+    _strengthCtrl = TextEditingController(text: m?.strength ?? '');
+    _categoryCtrl = TextEditingController(text: initialCat);
+    _manufacturerCtrl = TextEditingController(text: initialMfr);
+    _barcodeCtrl = TextEditingController(text: m?.barcode?.value ?? '');
+
+    // Setup Category selection logic
+    if (initialCat.isNotEmpty && widget.existingCategories.contains(initialCat)) {
+      _selectedCategoryDropdown = initialCat;
+      _isCustomCategory = false;
+    } else if (initialCat.isNotEmpty) {
+      _selectedCategoryDropdown = '__custom__';
+      _isCustomCategory = true;
+    } else {
+      _selectedCategoryDropdown = widget.existingCategories.isNotEmpty ? widget.existingCategories.first : '__custom__';
+      _isCustomCategory = widget.existingCategories.isEmpty;
+      if (!_isCustomCategory && _selectedCategoryDropdown != null) {
+        _categoryCtrl.text = _selectedCategoryDropdown!;
+      }
+    }
+
+    // Setup Manufacturer selection logic
+    if (initialMfr.isNotEmpty && widget.existingManufacturers.contains(initialMfr)) {
+      _selectedManufacturerDropdown = initialMfr;
+      _isCustomManufacturer = false;
+    } else if (initialMfr.isNotEmpty) {
+      _selectedManufacturerDropdown = '__custom__';
+      _isCustomManufacturer = true;
+    } else {
+      _selectedManufacturerDropdown = widget.existingManufacturers.isNotEmpty ? widget.existingManufacturers.first : '__custom__';
+      _isCustomManufacturer = widget.existingManufacturers.isEmpty;
+      if (!_isCustomManufacturer && _selectedManufacturerDropdown != null) {
+        _manufacturerCtrl.text = _selectedManufacturerDropdown!;
+      }
+    }
+
+    _dosageForm = m?.dosageForm ?? DosageForm.tablet;
+    _drugSchedule = m?.drugSchedule ?? DrugSchedule.none;
+    _prescriptionRequired = m?.prescriptionRequired ?? false;
+    _status = m?.status ?? MedicineStatus.active;
+
+    _purchasePriceCtrl = TextEditingController(
+      text: m != null ? m.purchasePrice.pkr.toStringAsFixed(2) : '',
+    );
+    _sellingPriceCtrl = TextEditingController(
+      text: m != null ? m.sellingPrice.pkr.toStringAsFixed(2) : '',
+    );
+    _mrpCtrl = TextEditingController(
+      text: m != null ? m.mrp.pkr.toStringAsFixed(2) : '',
+    );
+    _boxSizeCtrl = TextEditingController(
+      text: m != null ? '${m.boxSize}' : '1',
+    );
+    _boxPriceCtrl = TextEditingController(
+      text: m != null && m.boxPrice.paisa > 0
+          ? m.boxPrice.pkr.toStringAsFixed(2)
+          : '',
+    );
+    _minStockCtrl = TextEditingController(
+      text: m != null ? '${m.minStockLevel.value}' : '10',
+    );
+    _unit = m?.unit ?? 'Tab';
+
+    _rackCtrl = TextEditingController(text: m?.rackLocation ?? '');
+    _storageCtrl = TextEditingController(text: m?.storageInstructions ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _genericCtrl.dispose();
+    _strengthCtrl.dispose();
+    _categoryCtrl.dispose();
+    _manufacturerCtrl.dispose();
+    _barcodeCtrl.dispose();
+    _purchasePriceCtrl.dispose();
+    _sellingPriceCtrl.dispose();
+    _mrpCtrl.dispose();
+    _boxSizeCtrl.dispose();
+    _boxPriceCtrl.dispose();
+    _minStockCtrl.dispose();
+    _rackCtrl.dispose();
+    _storageCtrl.dispose();
+    super.dispose();
+  }
+
+  double _parsePkr(String text) => double.tryParse(text.trim()) ?? 0.0;
+  int _parseInt(String text) => int.tryParse(text.trim()) ?? 0;
+
+  void _autoCalcFromBox() {
+    final boxPrice = _parsePkr(_boxPriceCtrl.text);
+    final boxSize = _parseInt(_boxSizeCtrl.text);
+    if (boxPrice > 0 && boxSize > 0) {
+      final unitPrice = boxPrice / boxSize;
+      _sellingPriceCtrl.text = unitPrice.toStringAsFixed(2);
+    }
+  }
+
+  void _autoCalcFromUnit() {
+    final unitPrice = _parsePkr(_sellingPriceCtrl.text);
+    final boxSize = _parseInt(_boxSizeCtrl.text);
+    if (unitPrice > 0 && boxSize > 0) {
+      final boxPrice = unitPrice * boxSize;
+      _boxPriceCtrl.text = boxPrice.toStringAsFixed(2);
+    }
+  }
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+
+    final now = DateTime.now();
+    final m = widget.medicine;
+    final bCode = _barcodeCtrl.text.trim();
+
+    final medicine = Medicine(
+      id: m?.id ?? MedicineId.generate(),
+      name: _nameCtrl.text.trim(),
+      genericName: _genericCtrl.text.trim(),
+      manufacturer: _manufacturerCtrl.text.trim(),
+      dosageForm: _dosageForm,
+      strength: _strengthCtrl.text.trim(),
+      category: _categoryCtrl.text.trim(),
+      unit: _unit,
+      rackLocation: _rackCtrl.text.trim(),
+      drugSchedule: _drugSchedule,
+      storageInstructions: _storageCtrl.text.trim(),
+      barcode: bCode.isNotEmpty ? Barcode.unsafe(bCode) : null,
+      prescriptionRequired: _prescriptionRequired,
+      minStockLevel: Quantity.create(_parseInt(_minStockCtrl.text)),
+      purchasePrice: Money.fromPkr(_parsePkr(_purchasePriceCtrl.text)),
+      sellingPrice: Money.fromPkr(_parsePkr(_sellingPriceCtrl.text)),
+      mrp: Money.fromPkr(_parsePkr(_mrpCtrl.text)),
+      boxSize: _parseInt(_boxSizeCtrl.text) > 0 ? _parseInt(_boxSizeCtrl.text) : 1,
+      boxPrice: Money.fromPkr(_parsePkr(_boxPriceCtrl.text)),
+      status: _status,
+      createdAt: m?.createdAt ?? now,
+      updatedAt: now,
+    );
+
+    Navigator.of(context).pop(MedicineCreationResult(
+      medicine: medicine,
+      openingStock: null,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 900, maxHeight: 720),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withValues(alpha: 0.7),
+                  ],
+                ),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppRadius.lg),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _isEditing ? Icons.edit_rounded : Icons.medication_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Text(
+                    _isEditing ? 'Edit Medicine' : 'Add New Medicine',
+                    style: AppTypography.pageTitle.copyWith(color: Colors.white),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Colors.white),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            ),
+
+            Expanded(
+              child: Form(
+                key: _formKey,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildSectionHeader(
+                        'Basic Information',
+                        Icons.info_outline,
+                        AppColors.primary,
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      _buildSectionCard([
+                        _field('Medicine Name *', _nameCtrl, required: true),
+                        _field('Generic Name', _genericCtrl),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _field('Strength', _strengthCtrl, hint: 'e.g. 500mg'),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: _field('Barcode', _barcodeCtrl, hint: 'Scan or type'),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // âœ… Category Hybrid Selector
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  DropdownButtonFormField<String>(
+                                    value: _selectedCategoryDropdown,
+                                    decoration: _decoration('Category'),
+                                    items: [
+                                      ...widget.existingCategories.map((c) => DropdownMenuItem(
+                                        value: c,
+                                        child: Text(c),
+                                      )),
+                                      const DropdownMenuItem(
+                                        value: '__custom__',
+                                        child: Text('+ Add Custom Category...'),
+                                      ),
+                                    ],
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _selectedCategoryDropdown = val;
+                                        if (val == '__custom__') {
+                                          _isCustomCategory = true;
+                                          _categoryCtrl.clear();
+                                        } else if (val != null) {
+                                          _isCustomCategory = false;
+                                          _categoryCtrl.text = val;
+                                        }
+                                      });
+                                    },
+                                  ),
+                                  if (_isCustomCategory) ...[
+                                    const SizedBox(height: AppSpacing.xs),
+                                    TextFormField(
+                                      controller: _categoryCtrl,
+                                      decoration: _decoration('Type Custom Category'),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            // âœ… Manufacturer Hybrid Selector
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  DropdownButtonFormField<String>(
+                                    value: _selectedManufacturerDropdown,
+                                    decoration: _decoration('Manufacturer / Company'),
+                                    items: [
+                                      ...widget.existingManufacturers.map((c) => DropdownMenuItem(
+                                        value: c,
+                                        child: Text(c),
+                                      )),
+                                      const DropdownMenuItem(
+                                        value: '__custom__',
+                                        child: Text('+ Add Custom Manufacturer...'),
+                                      ),
+                                    ],
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _selectedManufacturerDropdown = val;
+                                        if (val == '__custom__') {
+                                          _isCustomManufacturer = true;
+                                          _manufacturerCtrl.clear();
+                                        } else if (val != null) {
+                                          _isCustomManufacturer = false;
+                                          _manufacturerCtrl.text = val;
+                                        }
+                                      });
+                                    },
+                                  ),
+                                  if (_isCustomManufacturer) ...[
+                                    const SizedBox(height: AppSpacing.xs),
+                                    TextFormField(
+                                      controller: _manufacturerCtrl,
+                                      decoration: _decoration('Type Custom Manufacturer'),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ]),
+
+                      const SizedBox(height: AppSpacing.lg),
+                      _buildSectionHeader(
+                        'Drug Classification',
+                        Icons.science_outlined,
+                        AppColors.info,
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      _buildSectionCard([
+                        Row(
+                          children: [
+                            Expanded(
+                              child: DropdownButtonFormField<DosageForm>(
+                                value: _dosageForm,
+                                decoration: _decoration('Dosage Form'),
+                                items: DosageForm.values
+                                    .map((f) => DropdownMenuItem(value: f, child: Text(f.label)))
+                                    .toList(),
+                                onChanged: (v) => setState(() => _dosageForm = v!),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: DropdownButtonFormField<DrugSchedule>(
+                                value: _drugSchedule,
+                                decoration: _decoration('Drug Schedule'),
+                                items: DrugSchedule.values
+                                    .map((s) => DropdownMenuItem(value: s, child: Text(s.label)))
+                                    .toList(),
+                                onChanged: (v) => setState(() => _drugSchedule = v!),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                value: _unit,
+                                decoration: _decoration('Unit'),
+                                items: _units
+                                    .map((u) => DropdownMenuItem(value: u, child: Text(u)))
+                                    .toList(),
+                                onChanged: (v) => setState(() => _unit = v!),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Material(
+                                color: Colors.transparent,
+                                child: SwitchListTile(
+                                  value: _prescriptionRequired,
+                                  onChanged: (v) => setState(() => _prescriptionRequired = v),
+                                  title: Text('Prescription Required', style: AppTypography.body),
+                                  contentPadding: EdgeInsets.zero,
+                                  activeColor: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: DropdownButtonFormField<MedicineStatus>(
+                                value: _status,
+                                decoration: _decoration('Catalog Status'),
+                                items: MedicineStatus.values
+                                    .map((s) => DropdownMenuItem(value: s, child: Text(s.label)))
+                                    .toList(),
+                                onChanged: (v) => setState(() => _status = v!),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ]),
+
+                      const SizedBox(height: AppSpacing.lg),
+                      _buildSectionHeader(
+                        'Pricing & Packaging',
+                        Icons.currency_exchange_rounded,
+                        AppColors.success,
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      _buildSectionCard([
+                        Row(
+                          children: [
+                            Expanded(child: _priceField('Purchase Price (PKR)', _purchasePriceCtrl)),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: _priceField(
+                                'Selling Price (PKR)',
+                                _sellingPriceCtrl,
+                                onChanged: (_) => _autoCalcFromUnit(),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(child: _priceField('MRP (PKR)', _mrpCtrl)),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _boxSizeCtrl,
+                                decoration: _decoration('Box Size (pieces)'),
+                                keyboardType: TextInputType.number,
+                                onChanged: (_) => _autoCalcFromBox(),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: _priceField(
+                                'Box Price (PKR)',
+                                _boxPriceCtrl,
+                                onChanged: (_) => _autoCalcFromBox(),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: TextFormField(
+                                controller: _minStockCtrl,
+                                decoration: _decoration('Min Alert Threshold', hint: 'e.g. 10'),
+                                keyboardType: TextInputType.number,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ]),
+
+                      const SizedBox(height: AppSpacing.lg),
+                      _buildSectionHeader(
+                        'Storage & Location',
+                        Icons.warehouse_outlined,
+                        AppColors.warning,
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      _buildSectionCard([
+                        Row(
+                          children: [
+                            Expanded(child: _field('Rack / Shelf Location', _rackCtrl, hint: 'e.g. A-3')),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(child: _field('Storage Instructions', _storageCtrl, hint: 'e.g. Keep below 25Â°C')),
+                          ],
+                        ),
+                      ]),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  AppButton(
+                    label: 'Cancel',
+                    variant: AppButtonVariant.ghost,
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  AppButton(
+                    label: _isEditing ? 'Save Changes' : 'Add Medicine',
+                    icon: _isEditing ? Icons.save_rounded : Icons.add_circle_rounded,
+                    variant: AppButtonVariant.primary,
+                    onPressed: _save,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon, Color color) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+          child: Icon(icon, size: 18, color: color),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Text(title, style: AppTypography.subtitle.copyWith(color: color)),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(child: Divider(color: color.withValues(alpha: 0.3))),
+      ],
+    );
+  }
+
+  Widget _buildSectionCard(List<Widget> children) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(children: children),
+    );
+  }
+
+  Widget _field(
+      String label,
+      TextEditingController ctrl, {
+        bool required = false,
+        String? hint,
+      }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: TextFormField(
+        controller: ctrl,
+        decoration: _decoration(label, hint: hint),
+        validator: required ? (v) => v == null || v.trim().isEmpty ? 'Required' : null : null,
+      ),
+    );
+  }
+
+  Widget _priceField(
+      String label,
+      TextEditingController ctrl, {
+        ValueChanged<String>? onChanged,
+      }) {
+    return TextFormField(
+      controller: ctrl,
+      decoration: _decoration(label),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      onChanged: onChanged,
+    );
+  }
+
+  InputDecoration _decoration(String label, {String? hint}) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        borderSide: const BorderSide(color: AppColors.primary, width: 2),
+      ),
+    );
+  }
+}
+
+========== FILE: lib/core/data/database_helper.dart ==========
+//
+// import 'dart:convert';
+// import 'dart:io';
+// import 'package:crypto/crypto.dart';
+// import 'package:flutter/foundation.dart';
+// import 'package:path/path.dart' as p;
+// import 'package:sqflite/sqflite.dart';
+// import '../../features/users/domain/role.dart';
+//
+// class DatabaseHelper {
+//   DatabaseHelper._();
+//   static final DatabaseHelper instance = DatabaseHelper._();
+//
+//   static const String _dbName = 'pharmasuite.db';
+//   static const int _dbVersion = 16;  // âœ… BUMPED from 15 to 16
+//   static const int _maxBackups = 3;
+//
+//   Database? _database;
+//
+//   Future<Database> get database async {
+//     if (_database != null) return _database!;
+//     _database = await _initDatabase();
+//     return _database!;
+//   }
+//
+//   Future<String> get databaseFilePath async {
+//     final dbPath = await getDatabasesPath();
+//     return p.join(dbPath, _dbName);
+//   }
+//
+//   static Future<String> get backupDirectoryPath async {
+//     String basePath;
+//     final userProfile =
+//         Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
+//     if (userProfile != null && userProfile.isNotEmpty) {
+//       basePath = p.join(userProfile, 'Documents', 'PharmaSuite Backups');
+//     } else {
+//       final dbPath = await getDatabasesPath();
+//       basePath = p.join(dbPath, 'backups');
+//     }
+//     final dir = Directory(basePath);
+//     if (!await dir.exists()) {
+//       await dir.create(recursive: true);
+//     }
+//     return basePath;
+//   }
+//
+//   Future<Database> _initDatabase() async {
+//     final dbPath = await getDatabasesPath();
+//     final path = p.join(dbPath, _dbName);
+//     final db = await openDatabase(
+//       path,
+//       version: _dbVersion,
+//       onCreate: _onCreate,
+//       onUpgrade: _onUpgrade,
+//     );
+//     await db.execute('PRAGMA journal_mode=WAL');
+//     await db.execute('PRAGMA synchronous=NORMAL');
+//     return db;
+//   }
+//
+//   Future<void> closeAndReopen() async {
+//     await close();
+//     _database = await _initDatabase();
+//   }
+//
+//   static Future<String?> createBackup() async {
+//     try {
+//       final db = await DatabaseHelper.instance.database;
+//       final backupDir = await backupDirectoryPath;
+//
+//       final now = DateTime.now();
+//       final ts = '${now.year}'
+//           '${now.month.toString().padLeft(2, '0')}'
+//           '${now.day.toString().padLeft(2, '0')}_'
+//           '${now.hour.toString().padLeft(2, '0')}'
+//           '${now.minute.toString().padLeft(2, '0')}'
+//           '${now.second.toString().padLeft(2, '0')}';
+//       final fileName = 'PharmaSuite_Backup_$ts.db';
+//       final targetPath = p.join(backupDir, fileName);
+//
+//       final targetFile = File(targetPath);
+//       if (await targetFile.exists()) {
+//         await targetFile.delete();
+//       }
+//
+//       final escapedPath = targetPath.replaceAll(r'\', '/');
+//       try {
+//         await db.execute("VACUUM INTO '$escapedPath'");
+//       } catch (_) {
+//         await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+//         final dbPath = await DatabaseHelper.instance.databaseFilePath;
+//         final sourceFile = File(dbPath);
+//         await sourceFile.copy(targetPath);
+//       }
+//
+//       await _cleanupOldBackups(backupDir);
+//       return targetPath;
+//     } catch (e, stack) {
+//       debugPrint('DatabaseHelper.createBackup error: $e\n$stack');
+//       return null;
+//     }
+//   }
+//
+//   static Future<void> _cleanupOldBackups(String backupDir) async {
+//     try {
+//       final dir = Directory(backupDir);
+//       if (!await dir.exists()) return;
+//
+//       final files = await dir
+//           .list()
+//           .where((e) => e is File && e.path.toLowerCase().endsWith('.db'))
+//           .cast<File>()
+//           .toList();
+//
+//       if (files.length <= _maxBackups) return;
+//
+//       files.sort((a, b) => a.path.compareTo(b.path));
+//
+//       final toDelete = files.take(files.length - _maxBackups);
+//       for (final f in toDelete) {
+//         await f.delete();
+//       }
+//     } catch (_) {}
+//   }
+//
+//   Future<void> _onCreate(Database db, int version) async {
+//     await _createMedicinesTable(db);
+//     await _createInventoryTables(db);
+//     await _createBatchesTable(db);
+//     await _createClassificationTables(db);
+//     await _createSalesTables(db);
+//     await _createPurchaseTables(db);
+//     await _createCustomerTables(db);
+//     await _createSupplierTables(db);
+//     await _createAccountsTables(db);
+//     await _createExpensesTables(db);
+//     await _createUsersTables(db);
+//     await _seedBuiltInPermissions(db);
+//     await _createSettingsTable(db);
+//     await _createConnectedClientsTable(db);
+//     await _createLicensesTable(db);
+//   }
+//
+//   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+//     if (oldVersion < 2) await _createInventoryTables(db);
+//     if (oldVersion < 3) await _createBatchesTable(db);
+//     if (oldVersion < 4) await _createClassificationTables(db);
+//     if (oldVersion < 5) await _createSalesTables(db);
+//     if (oldVersion < 6) await _createPurchaseTables(db);
+//     if (oldVersion < 7) {
+//       await _createCustomerTables(db);
+//       await _createSupplierTables(db);
+//     }
+//     if (oldVersion < 8) {
+//       await _createAccountsTables(db);
+//       await _createExpensesTables(db);
+//     }
+//     if (oldVersion < 9) {
+//       await _createUsersTables(db);
+//       await _createSettingsTable(db);
+//     }
+//     if (oldVersion < 10) {
+//       await db.execute('ALTER TABLE medicines ADD COLUMN box_size INTEGER NOT NULL DEFAULT 1');
+//       await db.execute('ALTER TABLE medicines ADD COLUMN box_price INTEGER NOT NULL DEFAULT 0');
+//     }
+//     if (oldVersion < 11) {
+//       await db.execute("ALTER TABLE medicines ADD COLUMN rack_location TEXT NOT NULL DEFAULT ''");
+//       await db.execute("ALTER TABLE medicines ADD COLUMN drug_schedule TEXT NOT NULL DEFAULT ''");
+//       await db.execute("ALTER TABLE medicines ADD COLUMN storage_instructions TEXT NOT NULL DEFAULT ''");
+//       await db.execute("ALTER TABLE medicines ADD COLUMN unit TEXT NOT NULL DEFAULT 'Tab'");
+//     }
+//     if (oldVersion < 12) {
+//       await _createConnectedClientsTable(db);
+//     }
+//     if (oldVersion < 13) {
+//       await _seedBuiltInPermissions(db);
+//     }
+//     if (oldVersion < 14) {
+//       await _createLicensesTable(db);
+//     }
+//     if (oldVersion < 15) {
+//       await db.execute(
+//         'ALTER TABLE supplier_ledger_entries ADD COLUMN account_id TEXT',
+//       );
+//       await db.execute(
+//         'ALTER TABLE customer_ledger_entries ADD COLUMN account_id TEXT',
+//       );
+//     }
+//     // âœ… NEW MIGRATION: Add mrp column to purchase_items
+//     if (oldVersion < 16) {
+//       await db.execute(
+//         'ALTER TABLE purchase_items ADD COLUMN mrp INTEGER NOT NULL DEFAULT 0',
+//       );
+//     }
+//   }
+//
+//   Future<void> _createLicensesTable(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS licenses (
+//         id INTEGER PRIMARY KEY AUTOINCREMENT,
+//         license_id TEXT UNIQUE NOT NULL,
+//         raw_payload TEXT NOT NULL,
+//         customer_name TEXT NOT NULL,
+//         business_name TEXT NOT NULL,
+//         device_id TEXT NOT NULL,
+//         license_type TEXT NOT NULL,
+//         activation_date TEXT NOT NULL,
+//         expiry_date TEXT,
+//         is_valid INTEGER NOT NULL DEFAULT 1,
+//         created_at TEXT NOT NULL
+//       )
+//     ''');
+//   }
+//
+//   Future<void> _createMedicinesTable(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS medicines (
+//         id TEXT PRIMARY KEY,
+//         name TEXT NOT NULL,
+//         generic_name TEXT NOT NULL DEFAULT '',
+//         manufacturer TEXT NOT NULL DEFAULT '',
+//         dosage_form TEXT NOT NULL DEFAULT '',
+//         strength TEXT NOT NULL DEFAULT '',
+//         category TEXT NOT NULL DEFAULT '',
+//         unit TEXT NOT NULL DEFAULT 'Tab',
+//         rack_location TEXT NOT NULL DEFAULT '',
+//         drug_schedule TEXT NOT NULL DEFAULT '',
+//         storage_instructions TEXT NOT NULL DEFAULT '',
+//         barcode TEXT UNIQUE,
+//         prescription_required INTEGER NOT NULL DEFAULT 0,
+//         min_stock_level INTEGER NOT NULL DEFAULT 0,
+//         purchase_price INTEGER NOT NULL DEFAULT 0,
+//         selling_price INTEGER NOT NULL DEFAULT 0,
+//         mrp INTEGER NOT NULL DEFAULT 0,
+//         box_size INTEGER NOT NULL DEFAULT 1,
+//         box_price INTEGER NOT NULL DEFAULT 0,
+//         status TEXT NOT NULL DEFAULT 'active',
+//         created_at TEXT NOT NULL,
+//         updated_at TEXT NOT NULL
+//       )
+//     ''');
+//     await db.execute('CREATE INDEX IF NOT EXISTS idx_medicines_name ON medicines(name)');
+//     await db.execute('CREATE INDEX IF NOT EXISTS idx_medicines_generic ON medicines(generic_name)');
+//     await db.execute('CREATE INDEX IF NOT EXISTS idx_medicines_barcode ON medicines(barcode)');
+//   }
+//
+//   Future<void> _createInventoryTables(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS inventory_stocks (
+//         medicine_id TEXT PRIMARY KEY,
+//         quantity INTEGER NOT NULL DEFAULT 0,
+//         FOREIGN KEY (medicine_id) REFERENCES medicines (id) ON DELETE CASCADE
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS inventory_movements (
+//         id TEXT PRIMARY KEY,
+//         medicine_id TEXT NOT NULL,
+//         batch_id TEXT,
+//         type TEXT NOT NULL,
+//         quantity_changed INTEGER NOT NULL,
+//         reason TEXT,
+//         reference TEXT,
+//         operator_name TEXT NOT NULL,
+//         created_at TEXT NOT NULL,
+//         FOREIGN KEY (medicine_id) REFERENCES medicines (id) ON DELETE CASCADE
+//       )
+//     ''');
+//   }
+//
+//   Future<void> _createBatchesTable(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS batches (
+//         id TEXT PRIMARY KEY,
+//         medicine_id TEXT NOT NULL,
+//         batch_number TEXT NOT NULL,
+//         expiry_date TEXT NOT NULL,
+//         quantity INTEGER NOT NULL DEFAULT 0,
+//         purchase_price INTEGER NOT NULL DEFAULT 0,
+//         selling_price INTEGER NOT NULL DEFAULT 0,
+//         created_at TEXT NOT NULL,
+//         updated_at TEXT NOT NULL,
+//         FOREIGN KEY (medicine_id) REFERENCES medicines (id) ON DELETE CASCADE
+//       )
+//     ''');
+//   }
+//
+//   Future<void> _createClassificationTables(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS categories (
+//         id TEXT PRIMARY KEY,
+//         name TEXT NOT NULL UNIQUE,
+//         description TEXT NOT NULL DEFAULT '',
+//         created_at TEXT NOT NULL
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS manufacturers (
+//         id TEXT PRIMARY KEY,
+//         name TEXT NOT NULL UNIQUE,
+//         contact TEXT NOT NULL DEFAULT '',
+//         address TEXT NOT NULL DEFAULT '',
+//         created_at TEXT NOT NULL
+//       )
+//     ''');
+//   }
+//
+//   Future<void> _createSalesTables(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS sales (
+//         id TEXT PRIMARY KEY,
+//         invoice_number TEXT NOT NULL UNIQUE,
+//         customer_name TEXT NOT NULL,
+//         operator_name TEXT NOT NULL,
+//         subtotal INTEGER NOT NULL,
+//         discount INTEGER NOT NULL,
+//         grand_total INTEGER NOT NULL,
+//         amount_received INTEGER NOT NULL,
+//         change_amount INTEGER NOT NULL,
+//         status TEXT NOT NULL,
+//         created_at TEXT NOT NULL
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS sale_items (
+//         id TEXT PRIMARY KEY,
+//         sale_id TEXT NOT NULL,
+//         medicine_id TEXT NOT NULL,
+//         medicine_name TEXT NOT NULL,
+//         medicine_strength TEXT NOT NULL,
+//         batch_id TEXT NOT NULL,
+//         batch_number TEXT NOT NULL,
+//         quantity INTEGER NOT NULL,
+//         unit_price INTEGER NOT NULL,
+//         discount_percent INTEGER NOT NULL,
+//         line_total INTEGER NOT NULL,
+//         FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS sale_payments (
+//         id TEXT PRIMARY KEY,
+//         sale_id TEXT NOT NULL,
+//         method TEXT NOT NULL,
+//         amount INTEGER NOT NULL,
+//         reference TEXT,
+//         FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS sales_returns (
+//         id TEXT PRIMARY KEY,
+//         original_sale_id TEXT NOT NULL,
+//         original_invoice_number TEXT NOT NULL,
+//         reason TEXT NOT NULL,
+//         notes TEXT,
+//         total_refund INTEGER NOT NULL,
+//         operator_name TEXT NOT NULL,
+//         created_at TEXT NOT NULL,
+//         FOREIGN KEY (original_sale_id) REFERENCES sales (id) ON DELETE CASCADE
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS sales_return_items (
+//         id TEXT PRIMARY KEY,
+//         return_id TEXT NOT NULL,
+//         original_sale_item_id TEXT NOT NULL,
+//         medicine_id TEXT NOT NULL,
+//         medicine_name TEXT NOT NULL,
+//         batch_id TEXT NOT NULL,
+//         batch_number TEXT NOT NULL,
+//         quantity INTEGER NOT NULL,
+//         refund_amount INTEGER NOT NULL,
+//         FOREIGN KEY (return_id) REFERENCES sales_returns (id) ON DELETE CASCADE
+//       )
+//     ''');
+//   }
+//
+//   Future<void> _createPurchaseTables(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS purchases (
+//         id TEXT PRIMARY KEY,
+//         invoice_number TEXT NOT NULL UNIQUE,
+//         supplier_name TEXT NOT NULL,
+//         subtotal INTEGER NOT NULL,
+//         discount INTEGER NOT NULL,
+//         grand_total INTEGER NOT NULL,
+//         status TEXT NOT NULL DEFAULT 'completed',
+//         created_at TEXT NOT NULL,
+//         updated_at TEXT NOT NULL
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS purchase_items (
+//         id TEXT PRIMARY KEY,
+//         purchase_id TEXT NOT NULL,
+//         medicine_id TEXT NOT NULL,
+//         medicine_name TEXT NOT NULL,
+//         batch_number TEXT NOT NULL,
+//         expiry_date TEXT NOT NULL,
+//         quantity INTEGER NOT NULL,
+//         purchase_price INTEGER NOT NULL,
+//         mrp INTEGER NOT NULL DEFAULT 0,
+//         selling_price INTEGER NOT NULL,
+//         line_total INTEGER NOT NULL,
+//         FOREIGN KEY (purchase_id) REFERENCES purchases (id) ON DELETE CASCADE
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS purchase_returns (
+//         id TEXT PRIMARY KEY,
+//         original_purchase_id TEXT NOT NULL,
+//         original_invoice_number TEXT NOT NULL,
+//         supplier_name TEXT NOT NULL,
+//         reason TEXT NOT NULL,
+//         notes TEXT,
+//         total_refund INTEGER NOT NULL,
+//         operator_name TEXT NOT NULL,
+//         created_at TEXT NOT NULL,
+//         FOREIGN KEY (original_purchase_id) REFERENCES purchases (id) ON DELETE CASCADE
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS purchase_return_items (
+//         id TEXT PRIMARY KEY,
+//         return_id TEXT NOT NULL,
+//         original_purchase_item_id TEXT NOT NULL,
+//         medicine_id TEXT NOT NULL,
+//         medicine_name TEXT NOT NULL,
+//         batch_number TEXT NOT NULL,
+//         quantity INTEGER NOT NULL,
+//         refund_amount INTEGER NOT NULL,
+//         FOREIGN KEY (return_id) REFERENCES purchase_returns (id) ON DELETE CASCADE
+//       )
+//     ''');
+//   }
+//
+//   Future<void> _createCustomerTables(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS customers (
+//         id TEXT PRIMARY KEY,
+//         name TEXT NOT NULL,
+//         phone TEXT NOT NULL DEFAULT '',
+//         email TEXT NOT NULL DEFAULT '',
+//         address TEXT NOT NULL DEFAULT '',
+//         credit_limit INTEGER NOT NULL DEFAULT 0,
+//         status TEXT NOT NULL DEFAULT 'active',
+//         created_at TEXT NOT NULL,
+//         updated_at TEXT NOT NULL
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS customer_ledger_entries (
+//         id TEXT PRIMARY KEY,
+//         customer_id TEXT NOT NULL,
+//         entry_type TEXT NOT NULL,
+//         description TEXT NOT NULL,
+//         reference TEXT,
+//         debit INTEGER NOT NULL DEFAULT 0,
+//         credit INTEGER NOT NULL DEFAULT 0,
+//         payment_method TEXT,
+//         account_id TEXT,
+//         operator_name TEXT NOT NULL,
+//         created_at TEXT NOT NULL,
+//         FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
+//       )
+//     ''');
+//   }
+//
+//   Future<void> _createSupplierTables(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS suppliers (
+//         id TEXT PRIMARY KEY,
+//         name TEXT NOT NULL,
+//         contact_person TEXT NOT NULL DEFAULT '',
+//         phone TEXT NOT NULL DEFAULT '',
+//         email TEXT NOT NULL DEFAULT '',
+//         address TEXT NOT NULL DEFAULT '',
+//         payment_terms TEXT NOT NULL DEFAULT '',
+//         status TEXT NOT NULL DEFAULT 'active',
+//         created_at TEXT NOT NULL,
+//         updated_at TEXT NOT NULL
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS supplier_ledger_entries (
+//         id TEXT PRIMARY KEY,
+//         supplier_id TEXT NOT NULL,
+//         entry_type TEXT NOT NULL,
+//         description TEXT NOT NULL,
+//         reference TEXT,
+//         debit INTEGER NOT NULL DEFAULT 0,
+//         credit INTEGER NOT NULL DEFAULT 0,
+//         payment_method TEXT,
+//         account_id TEXT,
+//         operator_name TEXT NOT NULL,
+//         created_at TEXT NOT NULL,
+//         FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE
+//       )
+//     ''');
+//   }
+//
+//   Future<void> _createAccountsTables(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS accounts (
+//         id TEXT PRIMARY KEY,
+//         name TEXT NOT NULL,
+//         account_type TEXT NOT NULL,
+//         opening_balance INTEGER NOT NULL DEFAULT 0,
+//         status TEXT NOT NULL DEFAULT 'active',
+//         notes TEXT NOT NULL DEFAULT '',
+//         created_at TEXT NOT NULL,
+//         updated_at TEXT NOT NULL
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS financial_transactions (
+//         id TEXT PRIMARY KEY,
+//         account_id TEXT NOT NULL,
+//         source TEXT NOT NULL,
+//         description TEXT NOT NULL,
+//         reference TEXT,
+//         debit INTEGER NOT NULL DEFAULT 0,
+//         credit INTEGER NOT NULL DEFAULT 0,
+//         operator_name TEXT NOT NULL,
+//         created_at TEXT NOT NULL,
+//         FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE
+//       )
+//     ''');
+//   }
+//
+//   Future<void> _createExpensesTables(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS expense_categories (
+//         id TEXT PRIMARY KEY,
+//         name TEXT NOT NULL UNIQUE,
+//         description TEXT NOT NULL DEFAULT '',
+//         created_at TEXT NOT NULL
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS expenses (
+//         id TEXT PRIMARY KEY,
+//         category TEXT NOT NULL,
+//         description TEXT NOT NULL,
+//         amount INTEGER NOT NULL,
+//         payment_method TEXT NOT NULL,
+//         account_id TEXT,
+//         reference TEXT,
+//         operator_name TEXT NOT NULL,
+//         expense_date TEXT NOT NULL,
+//         created_at TEXT NOT NULL,
+//         FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE SET NULL
+//       )
+//     ''');
+//     final defaults = ['Rent', 'Utilities', 'Salaries', 'Maintenance', 'Transport', 'Supplies', 'Other'];
+//     final now = DateTime.now().toIso8601String();
+//     for (final name in defaults) {
+//       await db.insert(
+//         'expense_categories',
+//         {'id': 'ec_${name.toLowerCase()}', 'name': name, 'description': '', 'created_at': now},
+//         conflictAlgorithm: ConflictAlgorithm.ignore,
+//       );
+//     }
+//   }
+//
+//   Future<void> _createUsersTables(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS roles (
+//         id TEXT PRIMARY KEY,
+//         name TEXT NOT NULL UNIQUE,
+//         description TEXT NOT NULL DEFAULT '',
+//         is_built_in INTEGER NOT NULL DEFAULT 0,
+//         created_at TEXT NOT NULL
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS role_permissions (
+//         role_id TEXT NOT NULL,
+//         category TEXT NOT NULL,
+//         action TEXT NOT NULL,
+//         PRIMARY KEY (role_id, category, action),
+//         FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE
+//       )
+//     ''');
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS users (
+//         id TEXT PRIMARY KEY,
+//         full_name TEXT NOT NULL,
+//         username TEXT NOT NULL UNIQUE,
+//         phone TEXT NOT NULL DEFAULT '',
+//         role_id TEXT NOT NULL,
+//         status TEXT NOT NULL DEFAULT 'active',
+//         password_hash TEXT NOT NULL DEFAULT '',
+//         last_login_at TEXT,
+//         created_at TEXT NOT NULL,
+//         updated_at TEXT NOT NULL,
+//         FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE RESTRICT
+//       )
+//     ''');
+//
+//     final now = DateTime.now().toIso8601String();
+//     final builtInRoles = [
+//       {'id': 'role_admin', 'name': 'Administrator', 'description': 'Full system access'},
+//       {'id': 'role_manager', 'name': 'Manager', 'description': 'Management access excluding licensing'},
+//       {'id': 'role_pharmacist', 'name': 'Pharmacist', 'description': 'Pharmacy operations access'},
+//       {'id': 'role_cashier', 'name': 'Cashier', 'description': 'POS and basic customer access'},
+//     ];
+//     for (final r in builtInRoles) {
+//       await db.insert(
+//         'roles',
+//         {...r, 'is_built_in': 1, 'created_at': now},
+//         conflictAlgorithm: ConflictAlgorithm.ignore,
+//       );
+//     }
+//   }
+//
+//   Future<void> _seedBuiltInPermissions(Database db) async {
+//     for (final roleId in [
+//       RoleId.admin,
+//       RoleId.manager,
+//       RoleId.pharmacist,
+//       RoleId.cashier,
+//     ]) {
+//       final count = Sqflite.firstIntValue(await db.rawQuery(
+//         'SELECT COUNT(*) FROM role_permissions WHERE role_id = ?',
+//         [roleId.value],
+//       )) ??
+//           0;
+//       if (count > 0) continue;
+//
+//       final batch = db.batch();
+//       for (final perm in Permission.defaultsFor(roleId)) {
+//         batch.insert(
+//           'role_permissions',
+//           {
+//             'role_id': roleId.value,
+//             'category': perm.category.name,
+//             'action': perm.action.name,
+//           },
+//           conflictAlgorithm: ConflictAlgorithm.ignore,
+//         );
+//       }
+//       await batch.commit(noResult: true);
+//     }
+//   }
+//
+//   Future<void> _createSettingsTable(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS settings (
+//         key TEXT PRIMARY KEY,
+//         value TEXT NOT NULL DEFAULT '',
+//         updated_at TEXT NOT NULL
+//       )
+//     ''');
+//   }
+//
+//   Future<void> _createConnectedClientsTable(Database db) async {
+//     await db.execute('''
+//       CREATE TABLE IF NOT EXISTS connected_clients (
+//         client_id TEXT PRIMARY KEY,
+//         pc_name TEXT NOT NULL,
+//         ip_address TEXT NOT NULL,
+//         connected_at TEXT NOT NULL,
+//         last_heartbeat TEXT NOT NULL
+//       )
+//     ''');
+//   }
+//
+//   Future<void> close() async {
+//     final db = _database;
+//     if (db != null) {
+//       await db.close();
+//       _database = null;
+//     }
+//   }
+// }
+import 'dart:convert';
+import 'dart:io';
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqflite/sqflite.dart';
+import '../../features/users/domain/role.dart';
+
+class DatabaseHelper {
+  DatabaseHelper._();
+  static final DatabaseHelper instance = DatabaseHelper._();
+
+  static const String _dbName = 'pharmasuite.db';
+  static const int _dbVersion = 16;  // âœ… BUMPED from 15 to 16
+  static const int _maxBackups = 3;
+
+  Database? _database;
+
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDatabase();
+    return _database!;
+  }
+
+  Future<String> get databaseFilePath async {
+    final dbPath = await getDatabasesPath();
+    return p.join(dbPath, _dbName);
+  }
+
+  static Future<String> get backupDirectoryPath async {
+    String basePath;
+    final userProfile =
+        Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
+    if (userProfile != null && userProfile.isNotEmpty) {
+      basePath = p.join(userProfile, 'Documents', 'PharmaSuite Backups');
+    } else {
+      final dbPath = await getDatabasesPath();
+      basePath = p.join(dbPath, 'backups');
+    }
+    final dir = Directory(basePath);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return basePath;
+  }
+
+  Future<Database> _initDatabase() async {
+    final dbPath = await getDatabasesPath();
+    final path = p.join(dbPath, _dbName);
+
+    // CRITICAL FIX: Ensure the directory exists on Windows before trying to open
+    final dir = Directory(dbPath);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+
+    final db = await openDatabase(
+      path,
+      version: _dbVersion,
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+      singleInstance: true,
+    );
+
+    // Configure database for high performance and prevent locking issues
+    await db.execute('PRAGMA journal_mode=WAL');
+    await db.execute('PRAGMA synchronous=NORMAL');
+    await db.execute('PRAGMA busy_timeout=5000'); // Wait if file is briefly locked
+    await db.execute('PRAGMA foreign_keys=ON');
+
+    return db;
+  }
+
+  Future<void> closeAndReopen() async {
+    await close();
+    _database = await _initDatabase();
+  }
+
+  static Future<String?> createBackup() async {
+    try {
+      final db = await DatabaseHelper.instance.database;
+      final backupDir = await backupDirectoryPath;
+
+      final now = DateTime.now();
+      final ts = '${now.year}'
+          '${now.month.toString().padLeft(2, '0')}'
+          '${now.day.toString().padLeft(2, '0')}_'
+          '${now.hour.toString().padLeft(2, '0')}'
+          '${now.minute.toString().padLeft(2, '0')}'
+          '${now.second.toString().padLeft(2, '0')}';
+      final fileName = 'PharmaSuite_Backup_$ts.db';
+      final targetPath = p.join(backupDir, fileName);
+
+      final targetFile = File(targetPath);
+      if (await targetFile.exists()) {
+        await targetFile.delete();
+      }
+
+      final escapedPath = targetPath.replaceAll(r'\', '/');
+      try {
+        await db.execute("VACUUM INTO '$escapedPath'");
+      } catch (_) {
+        await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+        final dbPath = await DatabaseHelper.instance.databaseFilePath;
+        final sourceFile = File(dbPath);
+        await sourceFile.copy(targetPath);
+      }
+
+      await _cleanupOldBackups(backupDir);
+      return targetPath;
+    } catch (e, stack) {
+      debugPrint('DatabaseHelper.createBackup error: $e\n$stack');
+      return null;
+    }
+  }
+
+  static Future<void> _cleanupOldBackups(String backupDir) async {
+    try {
+      final dir = Directory(backupDir);
+      if (!await dir.exists()) return;
+
+      final files = await dir
+          .list()
+          .where((e) => e is File && e.path.toLowerCase().endsWith('.db'))
+          .cast<File>()
+          .toList();
+
+      if (files.length <= _maxBackups) return;
+
+      files.sort((a, b) => a.path.compareTo(b.path));
+
+      final toDelete = files.take(files.length - _maxBackups);
+      for (final f in toDelete) {
+        await f.delete();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _onCreate(Database db, int version) async {
+    await _createMedicinesTable(db);
+    await _createInventoryTables(db);
+    await _createBatchesTable(db);
+    await _createClassificationTables(db);
+    await _createSalesTables(db);
+    await _createPurchaseTables(db);
+    await _createCustomerTables(db);
+    await _createSupplierTables(db);
+    await _createAccountsTables(db);
+    await _createExpensesTables(db);
+    await _createUsersTables(db);
+    await _seedBuiltInPermissions(db);
+    await _createSettingsTable(db);
+    await _createConnectedClientsTable(db);
+    await _createLicensesTable(db);
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) await _createInventoryTables(db);
+    if (oldVersion < 3) await _createBatchesTable(db);
+    if (oldVersion < 4) await _createClassificationTables(db);
+    if (oldVersion < 5) await _createSalesTables(db);
+    if (oldVersion < 6) await _createPurchaseTables(db);
+    if (oldVersion < 7) {
+      await _createCustomerTables(db);
+      await _createSupplierTables(db);
+    }
+    if (oldVersion < 8) {
+      await _createAccountsTables(db);
+      await _createExpensesTables(db);
+    }
+    if (oldVersion < 9) {
+      await _createUsersTables(db);
+      await _createSettingsTable(db);
+    }
+    if (oldVersion < 10) {
+      await db.execute('ALTER TABLE medicines ADD COLUMN box_size INTEGER NOT NULL DEFAULT 1');
+      await db.execute('ALTER TABLE medicines ADD COLUMN box_price INTEGER NOT NULL DEFAULT 0');
+    }
+    if (oldVersion < 11) {
+      await db.execute("ALTER TABLE medicines ADD COLUMN rack_location TEXT NOT NULL DEFAULT ''");
+      await db.execute("ALTER TABLE medicines ADD COLUMN drug_schedule TEXT NOT NULL DEFAULT ''");
+      await db.execute("ALTER TABLE medicines ADD COLUMN storage_instructions TEXT NOT NULL DEFAULT ''");
+      await db.execute("ALTER TABLE medicines ADD COLUMN unit TEXT NOT NULL DEFAULT 'Tab'");
+    }
+    if (oldVersion < 12) {
+      await _createConnectedClientsTable(db);
+    }
+    if (oldVersion < 13) {
+      await _seedBuiltInPermissions(db);
+    }
+    if (oldVersion < 14) {
+      await _createLicensesTable(db);
+    }
+    if (oldVersion < 15) {
+      await db.execute(
+        'ALTER TABLE supplier_ledger_entries ADD COLUMN account_id TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE customer_ledger_entries ADD COLUMN account_id TEXT',
+      );
+    }
+    // âœ… NEW MIGRATION: Add mrp column to purchase_items
+    if (oldVersion < 16) {
+      await db.execute(
+        'ALTER TABLE purchase_items ADD COLUMN mrp INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+  }
+
+  Future<void> _createLicensesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS licenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        license_id TEXT UNIQUE NOT NULL,
+        raw_payload TEXT NOT NULL,
+        customer_name TEXT NOT NULL,
+        business_name TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        license_type TEXT NOT NULL,
+        activation_date TEXT NOT NULL,
+        expiry_date TEXT,
+        is_valid INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createMedicinesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS medicines (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        generic_name TEXT NOT NULL DEFAULT '',
+        manufacturer TEXT NOT NULL DEFAULT '',
+        dosage_form TEXT NOT NULL DEFAULT '',
+        strength TEXT NOT NULL DEFAULT '',
+        category TEXT NOT NULL DEFAULT '',
+        unit TEXT NOT NULL DEFAULT 'Tab',
+        rack_location TEXT NOT NULL DEFAULT '',
+        drug_schedule TEXT NOT NULL DEFAULT '',
+        storage_instructions TEXT NOT NULL DEFAULT '',
+        barcode TEXT UNIQUE,
+        prescription_required INTEGER NOT NULL DEFAULT 0,
+        min_stock_level INTEGER NOT NULL DEFAULT 0,
+        purchase_price INTEGER NOT NULL DEFAULT 0,
+        selling_price INTEGER NOT NULL DEFAULT 0,
+        mrp INTEGER NOT NULL DEFAULT 0,
+        box_size INTEGER NOT NULL DEFAULT 1,
+        box_price INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_medicines_name ON medicines(name)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_medicines_generic ON medicines(generic_name)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_medicines_barcode ON medicines(barcode)');
+  }
+
+  Future<void> _createInventoryTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inventory_stocks (
+        medicine_id TEXT PRIMARY KEY,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (medicine_id) REFERENCES medicines (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inventory_movements (
+        id TEXT PRIMARY KEY,
+        medicine_id TEXT NOT NULL,
+        batch_id TEXT,
+        type TEXT NOT NULL,
+        quantity_changed INTEGER NOT NULL,
+        reason TEXT,
+        reference TEXT,
+        operator_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (medicine_id) REFERENCES medicines (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createBatchesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS batches (
+        id TEXT PRIMARY KEY,
+        medicine_id TEXT NOT NULL,
+        batch_number TEXT NOT NULL,
+        expiry_date TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        purchase_price INTEGER NOT NULL DEFAULT 0,
+        selling_price INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (medicine_id) REFERENCES medicines (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createClassificationTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS categories (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS manufacturers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        contact TEXT NOT NULL DEFAULT '',
+        address TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createSalesTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sales (
+        id TEXT PRIMARY KEY,
+        invoice_number TEXT NOT NULL UNIQUE,
+        customer_name TEXT NOT NULL,
+        operator_name TEXT NOT NULL,
+        subtotal INTEGER NOT NULL,
+        discount INTEGER NOT NULL,
+        grand_total INTEGER NOT NULL,
+        amount_received INTEGER NOT NULL,
+        change_amount INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sale_items (
+        id TEXT PRIMARY KEY,
+        sale_id TEXT NOT NULL,
+        medicine_id TEXT NOT NULL,
+        medicine_name TEXT NOT NULL,
+        medicine_strength TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        batch_number TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        unit_price INTEGER NOT NULL,
+        discount_percent INTEGER NOT NULL,
+        line_total INTEGER NOT NULL,
+        FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sale_payments (
+        id TEXT PRIMARY KEY,
+        sale_id TEXT NOT NULL,
+        method TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        reference TEXT,
+        FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sales_returns (
+        id TEXT PRIMARY KEY,
+        original_sale_id TEXT NOT NULL,
+        original_invoice_number TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        notes TEXT,
+        total_refund INTEGER NOT NULL,
+        operator_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (original_sale_id) REFERENCES sales (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sales_return_items (
+        id TEXT PRIMARY KEY,
+        return_id TEXT NOT NULL,
+        original_sale_item_id TEXT NOT NULL,
+        medicine_id TEXT NOT NULL,
+        medicine_name TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        batch_number TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        refund_amount INTEGER NOT NULL,
+        FOREIGN KEY (return_id) REFERENCES sales_returns (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createPurchaseTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS purchases (
+        id TEXT PRIMARY KEY,
+        invoice_number TEXT NOT NULL UNIQUE,
+        supplier_name TEXT NOT NULL,
+        subtotal INTEGER NOT NULL,
+        discount INTEGER NOT NULL,
+        grand_total INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'completed',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS purchase_items (
+        id TEXT PRIMARY KEY,
+        purchase_id TEXT NOT NULL,
+        medicine_id TEXT NOT NULL,
+        medicine_name TEXT NOT NULL,
+        batch_number TEXT NOT NULL,
+        expiry_date TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        purchase_price INTEGER NOT NULL,
+        mrp INTEGER NOT NULL DEFAULT 0,
+        selling_price INTEGER NOT NULL,
+        line_total INTEGER NOT NULL,
+        FOREIGN KEY (purchase_id) REFERENCES purchases (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS purchase_returns (
+        id TEXT PRIMARY KEY,
+        original_purchase_id TEXT NOT NULL,
+        original_invoice_number TEXT NOT NULL,
+        supplier_name TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        notes TEXT,
+        total_refund INTEGER NOT NULL,
+        operator_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (original_purchase_id) REFERENCES purchases (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS purchase_return_items (
+        id TEXT PRIMARY KEY,
+        return_id TEXT NOT NULL,
+        original_purchase_item_id TEXT NOT NULL,
+        medicine_id TEXT NOT NULL,
+        medicine_name TEXT NOT NULL,
+        batch_number TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        refund_amount INTEGER NOT NULL,
+        FOREIGN KEY (return_id) REFERENCES purchase_returns (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createCustomerTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS customers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        phone TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL DEFAULT '',
+        address TEXT NOT NULL DEFAULT '',
+        credit_limit INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS customer_ledger_entries (
+        id TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL,
+        entry_type TEXT NOT NULL,
+        description TEXT NOT NULL,
+        reference TEXT,
+        debit INTEGER NOT NULL DEFAULT 0,
+        credit INTEGER NOT NULL DEFAULT 0,
+        payment_method TEXT,
+        account_id TEXT,
+        operator_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createSupplierTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS suppliers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        contact_person TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL DEFAULT '',
+        address TEXT NOT NULL DEFAULT '',
+        payment_terms TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS supplier_ledger_entries (
+        id TEXT PRIMARY KEY,
+        supplier_id TEXT NOT NULL,
+        entry_type TEXT NOT NULL,
+        description TEXT NOT NULL,
+        reference TEXT,
+        debit INTEGER NOT NULL DEFAULT 0,
+        credit INTEGER NOT NULL DEFAULT 0,
+        payment_method TEXT,
+        account_id TEXT,
+        operator_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (supplier_id) REFERENCES suppliers (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createAccountsTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS accounts (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        account_type TEXT NOT NULL,
+        opening_balance INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS financial_transactions (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        description TEXT NOT NULL,
+        reference TEXT,
+        debit INTEGER NOT NULL DEFAULT 0,
+        credit INTEGER NOT NULL DEFAULT 0,
+        operator_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createExpensesTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS expense_categories (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS expenses (
+        id TEXT PRIMARY KEY,
+        category TEXT NOT NULL,
+        description TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        payment_method TEXT NOT NULL,
+        account_id TEXT,
+        reference TEXT,
+        operator_name TEXT NOT NULL,
+        expense_date TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE SET NULL
+      )
+    ''');
+    final defaults = ['Rent', 'Utilities', 'Salaries', 'Maintenance', 'Transport', 'Supplies', 'Other'];
+    final now = DateTime.now().toIso8601String();
+    for (final name in defaults) {
+      await db.insert(
+        'expense_categories',
+        {'id': 'ec_${name.toLowerCase()}', 'name': name, 'description': '', 'created_at': now},
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+  }
+
+  Future<void> _createUsersTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS roles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL DEFAULT '',
+        is_built_in INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS role_permissions (
+        role_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        action TEXT NOT NULL,
+        PRIMARY KEY (role_id, category, action),
+        FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        full_name TEXT NOT NULL,
+        username TEXT NOT NULL UNIQUE,
+        phone TEXT NOT NULL DEFAULT '',
+        role_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        password_hash TEXT NOT NULL DEFAULT '',
+        last_login_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE RESTRICT
+      )
+    ''');
+
+    final now = DateTime.now().toIso8601String();
+    final builtInRoles = [
+      {'id': 'role_admin', 'name': 'Administrator', 'description': 'Full system access'},
+      {'id': 'role_manager', 'name': 'Manager', 'description': 'Management access excluding licensing'},
+      {'id': 'role_pharmacist', 'name': 'Pharmacist', 'description': 'Pharmacy operations access'},
+      {'id': 'role_cashier', 'name': 'Cashier', 'description': 'POS and basic customer access'},
+    ];
+    for (final r in builtInRoles) {
+      await db.insert(
+        'roles',
+        {...r, 'is_built_in': 1, 'created_at': now},
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+  }
+
+  Future<void> _seedBuiltInPermissions(Database db) async {
+    for (final roleId in [
+      RoleId.admin,
+      RoleId.manager,
+      RoleId.pharmacist,
+      RoleId.cashier,
+    ]) {
+      final count = Sqflite.firstIntValue(await db.rawQuery(
+        'SELECT COUNT(*) FROM role_permissions WHERE role_id = ?',
+        [roleId.value],
+      )) ??
+          0;
+      if (count > 0) continue;
+
+      final batch = db.batch();
+      for (final perm in Permission.defaultsFor(roleId)) {
+        batch.insert(
+          'role_permissions',
+          {
+            'role_id': roleId.value,
+            'category': perm.category.name,
+            'action': perm.action.name,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+      await batch.commit(noResult: true);
+    }
+  }
+
+  Future<void> _createSettingsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createConnectedClientsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS connected_clients (
+        client_id TEXT PRIMARY KEY,
+        pc_name TEXT NOT NULL,
+        ip_address TEXT NOT NULL,
+        connected_at TEXT NOT NULL,
+        last_heartbeat TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> close() async {
+    final db = _database;
+    if (db != null) {
+      try {
+        // CRITICAL FIX: Ensure WAL file changes are checkpointed (saved to main .db file)
+        // before we close the database, preventing future SQLITE_CANTOPEN errors
+        await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+      } catch (e) {
+        debugPrint('[DB] WAL Checkpoint error during close: $e');
+      }
+      await db.close();
+      _database = null;
+    }
+  }
+}
+
+========== FILE: lib/features/categories/domain/category_repository.dart ==========
+import '../../../core/result/result.dart';
+import 'category.dart';
+import 'manufacturer.dart';
+
+/// Combined contract for category + manufacturer master data.
+abstract class CategoryRepository {
+  // Categories
+  Future<Result<List<Category>>> getCategories({String? searchQuery});
+  Future<Result<Category>> createCategory(Category category);
+  Future<Result<Category>> updateCategory(Category category);
+  Future<Result<void>> deleteCategory(CategoryId id);
+
+  // Manufacturers
+  Future<Result<List<Manufacturer>>> getManufacturers({String? searchQuery});
+  Future<Result<Manufacturer>> createManufacturer(Manufacturer manufacturer);
+  Future<Result<Manufacturer>> updateManufacturer(Manufacturer manufacturer);
+  Future<Result<void>> deleteManufacturer(ManufacturerId id);
+}
+
+========== FILE: lib/features/categories/application/category_use_cases.dart ==========
+import '../../../core/error/failures.dart';
+import '../../../core/result/result.dart';
+import '../domain/category.dart';
+import '../domain/manufacturer.dart';
+import '../domain/category_repository.dart';
+
+class GetCategoriesUseCase {
+  final CategoryRepository _repo;
+  const GetCategoriesUseCase(this._repo);
+
+  Future<Result<List<Category>>> execute({String? searchQuery}) =>
+      _repo.getCategories(searchQuery: searchQuery);
+}
+
+class SaveCategoryUseCase {
+  final CategoryRepository _repo;
+  const SaveCategoryUseCase(this._repo);
+
+  Future<Result<Category>> execute(Category c, {bool isNew = true}) async {
+    if (c.name.trim().isEmpty) {
+      return const Failure(ValidationFailure(message: 'Category name is required.'));
+    }
+    return isNew ? _repo.createCategory(c) : _repo.updateCategory(c);
+  }
+}
+
+class DeleteCategoryUseCase {
+  final CategoryRepository _repo;
+  const DeleteCategoryUseCase(this._repo);
+
+  Future<Result<void>> execute(CategoryId id) => _repo.deleteCategory(id);
+}
+
+class GetManufacturersUseCase {
+  final CategoryRepository _repo;
+  const GetManufacturersUseCase(this._repo);
+
+  Future<Result<List<Manufacturer>>> execute({String? searchQuery}) =>
+      _repo.getManufacturers(searchQuery: searchQuery);
+}
+
+class SaveManufacturerUseCase {
+  final CategoryRepository _repo;
+  const SaveManufacturerUseCase(this._repo);
+
+  Future<Result<Manufacturer>> execute(Manufacturer m, {bool isNew = true}) async {
+    if (m.name.trim().isEmpty) {
+      return const Failure(ValidationFailure(message: 'Manufacturer name is required.'));
+    }
+    return isNew ? _repo.createManufacturer(m) : _repo.updateManufacturer(m);
+  }
+}
+
+class DeleteManufacturerUseCase {
+  final CategoryRepository _repo;
+  const DeleteManufacturerUseCase(this._repo);
+
+  Future<Result<void>> execute(ManufacturerId id) => _repo.deleteManufacturer(id);
+}
+
+========== FILE: lib/features/categories/presentation/controllers/category_controller.dart ==========
+import 'package:flutter/material.dart';
+import '../../domain/category.dart';
+import '../../domain/manufacturer.dart';
+import '../../domain/category_repository.dart';
+import '../../application/category_use_cases.dart';
+
+class CategoryController extends ChangeNotifier {
+  final GetCategoriesUseCase _getCategories;
+  final SaveCategoryUseCase _saveCategory;
+  final DeleteCategoryUseCase _deleteCategory;
+  final GetManufacturersUseCase _getManufacturers;
+  final SaveManufacturerUseCase _saveManufacturer;
+  final DeleteManufacturerUseCase _deleteManufacturer;
+
+  CategoryController({required CategoryRepository repository})
+      : _getCategories = GetCategoriesUseCase(repository),
+        _saveCategory = SaveCategoryUseCase(repository),
+        _deleteCategory = DeleteCategoryUseCase(repository),
+        _getManufacturers = GetManufacturersUseCase(repository),
+        _saveManufacturer = SaveManufacturerUseCase(repository),
+        _deleteManufacturer = DeleteManufacturerUseCase(repository);
+
+  List<Category> _categories = [];
+  List<Manufacturer> _manufacturers = [];
+  bool _isLoading = false;
+  String? _error;
+
+  List<Category> get categories => _categories;
+  List<Manufacturer> get manufacturers => _manufacturers;
+  bool get isLoading => _isLoading;
+  String? get error => _error;
+
+  Future<void> loadAll({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
+
+    final catResult = await _getCategories.execute();
+    final mfrResult = await _getManufacturers.execute();
+
+    catResult.fold(
+      onSuccess: (d) => _categories = d,
+      onFailure: (f) => _error = f.message,
+    );
+    mfrResult.fold(
+      onSuccess: (d) => _manufacturers = d,
+      onFailure: (f) => _error = f.message,
+    );
+
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<String?> saveCategory(Category c, {bool isNew = true}) async {
+    final result = await _saveCategory.execute(c, isNew: isNew);
+    return result.fold(
+      onSuccess: (_) {
+        loadAll();
+        return null;
+      },
+      onFailure: (f) => f.message,
+    );
+  }
+
+  Future<String?> deleteCategory(CategoryId id) async {
+    final result = await _deleteCategory.execute(id);
+    return result.fold(
+      onSuccess: (_) {
+        loadAll();
+        return null;
+      },
+      onFailure: (f) => f.message,
+    );
+  }
+
+  Future<String?> saveManufacturer(Manufacturer m, {bool isNew = true}) async {
+    final result = await _saveManufacturer.execute(m, isNew: isNew);
+    return result.fold(
+      onSuccess: (_) {
+        loadAll();
+        return null;
+      },
+      onFailure: (f) => f.message,
+    );
+  }
+
+  Future<String?> deleteManufacturer(ManufacturerId id) async {
+    final result = await _deleteManufacturer.execute(id);
+    return result.fold(
+      onSuccess: (_) {
+        loadAll();
+        return null;
+      },
+      onFailure: (f) => f.message,
+    );
+  }
+}
+
+========== FILE: lib\features\medicines\application\medicine_use_cases.dart ==========
+import 'package:pharmacy/core/result/result.dart';
+import 'package:pharmacy/core/error/failures.dart';
+import '../domain/medicine.dart';
+import '../domain/medicine_repository.dart';
+
+class CreateMedicineUseCase {
+  final MedicineRepository _repository;
+  const CreateMedicineUseCase(this._repository);
+
+  Future<Result<Medicine>> execute(Medicine medicine) async {
+    if (medicine.name.trim().isEmpty) {
+      return const Failure(ValidationFailure(message: 'Medicine name is required.'));
+    }
+    if (medicine.name.trim().length < 2) {
+      return const Failure(ValidationFailure(message: 'Medicine name must be at least 2 characters.'));
+    }
+    if (medicine.sellingPrice.paisa < 0) {
+      return const Failure(ValidationFailure(message: 'Selling price cannot be negative.'));
+    }
+    if (medicine.purchasePrice.paisa < 0) {
+      return const Failure(ValidationFailure(message: 'Purchase price cannot be negative.'));
+    }
+    if (medicine.mrp.paisa < 0) {
+      return const Failure(ValidationFailure(message: 'MRP cannot be negative.'));
+    }
+    if (!medicine.isPriceValid) {
+      return const Failure(ValidationFailure(message: 'Selling price cannot exceed MRP.'));
+    }
+    if (medicine.boxSize < 1) {
+      return const Failure(ValidationFailure(message: 'Box size must be at least 1.'));
+    }
+    return _repository.createMedicine(medicine);
+  }
+}
+
+class UpdateMedicineUseCase {
+  final MedicineRepository _repository;
+  const UpdateMedicineUseCase(this._repository);
+
+  Future<Result<Medicine>> execute(Medicine medicine) async {
+    if (medicine.name.trim().isEmpty) {
+      return const Failure(ValidationFailure(message: 'Medicine name is required.'));
+    }
+    if (!medicine.isPriceValid) {
+      return const Failure(ValidationFailure(message: 'Selling price cannot exceed MRP.'));
+    }
+    return _repository.updateMedicine(medicine);
+  }
+}
+
+class GetMedicinesUseCase {
+  final MedicineRepository _repository;
+  const GetMedicinesUseCase(this._repository);
+
+  Future<Result<List<Medicine>>> execute({
+    MedicineFilter filter = const MedicineFilter(),
+  }) async {
+    return _repository.getMedicines(filter: filter);
+  }
+}
+
+class GetMedicineByIdUseCase {
+  final MedicineRepository _repository;
+  const GetMedicineByIdUseCase(this._repository);
+
+  Future<Result<Medicine>> execute(MedicineId id) async {
+    return _repository.getMedicineById(id);
+  }
+}
+
+class DeleteMedicineUseCase {
+  final MedicineRepository _repository;
+  const DeleteMedicineUseCase(this._repository);
+
+  Future<Result<void>> execute(MedicineId id) async {
+    return _repository.deleteMedicine(id);
+  }
+}
+

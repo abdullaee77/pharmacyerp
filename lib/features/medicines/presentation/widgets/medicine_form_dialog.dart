@@ -56,6 +56,12 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
   late final TextEditingController _manufacturerCtrl;
   late final TextEditingController _barcodeCtrl;
 
+  // Category & Manufacturer Selection Mode
+  late String? _selectedCategoryDropdown;
+  late bool _isCustomCategory;
+  late String? _selectedManufacturerDropdown;
+  late bool _isCustomManufacturer;
+
   // Classification
   late DosageForm _dosageForm;
   late DrugSchedule _drugSchedule;
@@ -94,13 +100,45 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
   void initState() {
     super.initState();
     final m = widget.medicine;
+    final initialCat = m?.category ?? '';
+    final initialMfr = m?.manufacturer ?? '';
 
     _nameCtrl = TextEditingController(text: m?.name ?? '');
     _genericCtrl = TextEditingController(text: m?.genericName ?? '');
     _strengthCtrl = TextEditingController(text: m?.strength ?? '');
-    _categoryCtrl = TextEditingController(text: m?.category ?? '');
-    _manufacturerCtrl = TextEditingController(text: m?.manufacturer ?? '');
+    _categoryCtrl = TextEditingController(text: initialCat);
+    _manufacturerCtrl = TextEditingController(text: initialMfr);
     _barcodeCtrl = TextEditingController(text: m?.barcode?.value ?? '');
+
+    // Setup Category selection logic
+    if (initialCat.isNotEmpty && widget.existingCategories.contains(initialCat)) {
+      _selectedCategoryDropdown = initialCat;
+      _isCustomCategory = false;
+    } else if (initialCat.isNotEmpty) {
+      _selectedCategoryDropdown = '__custom__';
+      _isCustomCategory = true;
+    } else {
+      _selectedCategoryDropdown = widget.existingCategories.isNotEmpty ? widget.existingCategories.first : '__custom__';
+      _isCustomCategory = widget.existingCategories.isEmpty;
+      if (!_isCustomCategory && _selectedCategoryDropdown != null) {
+        _categoryCtrl.text = _selectedCategoryDropdown!;
+      }
+    }
+
+    // Setup Manufacturer selection logic
+    if (initialMfr.isNotEmpty && widget.existingManufacturers.contains(initialMfr)) {
+      _selectedManufacturerDropdown = initialMfr;
+      _isCustomManufacturer = false;
+    } else if (initialMfr.isNotEmpty) {
+      _selectedManufacturerDropdown = '__custom__';
+      _isCustomManufacturer = true;
+    } else {
+      _selectedManufacturerDropdown = widget.existingManufacturers.isNotEmpty ? widget.existingManufacturers.first : '__custom__';
+      _isCustomManufacturer = widget.existingManufacturers.isEmpty;
+      if (!_isCustomManufacturer && _selectedManufacturerDropdown != null) {
+        _manufacturerCtrl.text = _selectedManufacturerDropdown!;
+      }
+    }
 
     _dosageForm = m?.dosageForm ?? DosageForm.tablet;
     _drugSchedule = m?.drugSchedule ?? DrugSchedule.none;
@@ -178,7 +216,6 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
 
     final now = DateTime.now();
     final m = widget.medicine;
-
     final bCode = _barcodeCtrl.text.trim();
 
     final medicine = Medicine(
@@ -208,7 +245,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
 
     Navigator.of(context).pop(MedicineCreationResult(
       medicine: medicine,
-      openingStock: null, // Always null now. Handled via Purchase Tab!
+      openingStock: null,
     ));
   }
 
@@ -220,7 +257,6 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Gradient Header
             Container(
               padding: const EdgeInsets.all(AppSpacing.lg),
               decoration: BoxDecoration(
@@ -255,7 +291,6 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
               ),
             ),
 
-            // Form Body
             Expanded(
               child: Form(
                 key: _formKey,
@@ -285,46 +320,89 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                           ],
                         ),
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // ✅ Category Hybrid Selector
                             Expanded(
-                              child: Autocomplete<String>(
-                                initialValue: TextEditingValue(text: _categoryCtrl.text),
-                                optionsBuilder: (val) {
-                                  if (val.text.isEmpty) return widget.existingCategories;
-                                  return widget.existingCategories.where(
-                                        (c) => c.toLowerCase().contains(val.text.toLowerCase()),
-                                  );
-                                },
-                                fieldViewBuilder: (ctx, ctrl, focus, onSubmit) {
-                                  _categoryCtrl.text = ctrl.text;
-                                  return TextFormField(
-                                    controller: ctrl,
-                                    focusNode: focus,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  DropdownButtonFormField<String>(
+                                    value: _selectedCategoryDropdown,
                                     decoration: _decoration('Category'),
-                                    onChanged: (v) => _categoryCtrl.text = v,
-                                  );
-                                },
+                                    items: [
+                                      ...widget.existingCategories.map((c) => DropdownMenuItem(
+                                        value: c,
+                                        child: Text(c),
+                                      )),
+                                      const DropdownMenuItem(
+                                        value: '__custom__',
+                                        child: Text('+ Add Custom Category...'),
+                                      ),
+                                    ],
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _selectedCategoryDropdown = val;
+                                        if (val == '__custom__') {
+                                          _isCustomCategory = true;
+                                          _categoryCtrl.clear();
+                                        } else if (val != null) {
+                                          _isCustomCategory = false;
+                                          _categoryCtrl.text = val;
+                                        }
+                                      });
+                                    },
+                                  ),
+                                  if (_isCustomCategory) ...[
+                                    const SizedBox(height: AppSpacing.xs),
+                                    TextFormField(
+                                      controller: _categoryCtrl,
+                                      decoration: _decoration('Type Custom Category'),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
                             const SizedBox(width: AppSpacing.md),
+                            // ✅ Manufacturer Hybrid Selector
                             Expanded(
-                              child: Autocomplete<String>(
-                                initialValue: TextEditingValue(text: _manufacturerCtrl.text),
-                                optionsBuilder: (val) {
-                                  if (val.text.isEmpty) return widget.existingManufacturers;
-                                  return widget.existingManufacturers.where(
-                                        (c) => c.toLowerCase().contains(val.text.toLowerCase()),
-                                  );
-                                },
-                                fieldViewBuilder: (ctx, ctrl, focus, onSubmit) {
-                                  _manufacturerCtrl.text = ctrl.text;
-                                  return TextFormField(
-                                    controller: ctrl,
-                                    focusNode: focus,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  DropdownButtonFormField<String>(
+                                    value: _selectedManufacturerDropdown,
                                     decoration: _decoration('Manufacturer / Company'),
-                                    onChanged: (v) => _manufacturerCtrl.text = v,
-                                  );
-                                },
+                                    items: [
+                                      ...widget.existingManufacturers.map((c) => DropdownMenuItem(
+                                        value: c,
+                                        child: Text(c),
+                                      )),
+                                      const DropdownMenuItem(
+                                        value: '__custom__',
+                                        child: Text('+ Add Custom Manufacturer...'),
+                                      ),
+                                    ],
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _selectedManufacturerDropdown = val;
+                                        if (val == '__custom__') {
+                                          _isCustomManufacturer = true;
+                                          _manufacturerCtrl.clear();
+                                        } else if (val != null) {
+                                          _isCustomManufacturer = false;
+                                          _manufacturerCtrl.text = val;
+                                        }
+                                      });
+                                    },
+                                  ),
+                                  if (_isCustomManufacturer) ...[
+                                    const SizedBox(height: AppSpacing.xs),
+                                    TextFormField(
+                                      controller: _manufacturerCtrl,
+                                      decoration: _decoration('Type Custom Manufacturer'),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
                           ],
@@ -481,7 +559,6 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
               ),
             ),
 
-            // Footer Actions
             const Divider(height: 1),
             Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),

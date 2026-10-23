@@ -6,15 +6,11 @@ import '../domain/medicine.dart';
 import '../domain/medicine_repository.dart';
 import 'medicine_model.dart';
 
-/// SQLite implementation of [MedicineRepository].
-///
-/// All database access is isolated here. The domain layer never
-/// knows that SQLite exists.
 class SqliteMedicineRepository implements MedicineRepository {
   final DatabaseHelper _dbHelper;
 
   SqliteMedicineRepository({DatabaseHelper? dbHelper})
-    : _dbHelper = dbHelper ?? DatabaseHelper.instance;
+      : _dbHelper = dbHelper ?? DatabaseHelper.instance;
 
   Future<Database> get _db => _dbHelper.database;
 
@@ -117,7 +113,6 @@ class SqliteMedicineRepository implements MedicineRepository {
     try {
       final db = await _db;
 
-      // Check barcode uniqueness
       if (medicine.barcode != null) {
         final existing = await db.query(
           'medicines',
@@ -156,7 +151,6 @@ class SqliteMedicineRepository implements MedicineRepository {
     try {
       final db = await _db;
 
-      // Check barcode uniqueness (exclude self)
       if (medicine.barcode != null) {
         final existing = await db.query(
           'medicines',
@@ -215,30 +209,38 @@ class SqliteMedicineRepository implements MedicineRepository {
     }
   }
 
+  // ✅ FIX: Combines categories from BOTH Settings and Medicines tables
   @override
   Future<Result<List<String>>> getCategories() async {
     try {
       final db = await _db;
-      final rows = await db.rawQuery(
-        'SELECT DISTINCT category FROM medicines WHERE category != "" ORDER BY category ASC',
-      );
-      final categories = rows.map((r) => r['category'] as String).toList();
+      final rows = await db.rawQuery('''
+        SELECT DISTINCT cat_name FROM (
+          SELECT name AS cat_name FROM categories WHERE name IS NOT NULL AND name != ''
+          UNION
+          SELECT category AS cat_name FROM medicines WHERE category IS NOT NULL AND category != ''
+        ) ORDER BY cat_name ASC
+      ''');
+      final categories = rows.map((r) => r['cat_name'] as String).toList();
       return Success(categories);
     } catch (e) {
       return Failure(DatabaseFailure(message: 'Failed to load categories: $e'));
     }
   }
 
+  // ✅ FIX: Combines manufacturers from BOTH Settings and Medicines tables
   @override
   Future<Result<List<String>>> getManufacturers() async {
     try {
       final db = await _db;
-      final rows = await db.rawQuery(
-        'SELECT DISTINCT manufacturer FROM medicines WHERE manufacturer != "" ORDER BY manufacturer ASC',
-      );
-      final manufacturers = rows
-          .map((r) => r['manufacturer'] as String)
-          .toList();
+      final rows = await db.rawQuery('''
+        SELECT DISTINCT mfr_name FROM (
+          SELECT name AS mfr_name FROM manufacturers WHERE name IS NOT NULL AND name != ''
+          UNION
+          SELECT manufacturer AS mfr_name FROM medicines WHERE manufacturer IS NOT NULL AND manufacturer != ''
+        ) ORDER BY mfr_name ASC
+      ''');
+      final manufacturers = rows.map((r) => r['mfr_name'] as String).toList();
       return Success(manufacturers);
     } catch (e) {
       return Failure(

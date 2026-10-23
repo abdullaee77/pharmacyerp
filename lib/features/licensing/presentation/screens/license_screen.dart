@@ -1,5 +1,3 @@
-// lib/features/licensing/presentation/screens/license_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -13,7 +11,14 @@ import '../controllers/license_controller.dart';
 class LicenseScreen extends StatefulWidget {
   final LicenseController controller;
 
-  const LicenseScreen({super.key, required this.controller});
+  /// Callback triggered when a license payload is successfully verified & activated.
+  final VoidCallback? onLicenseActivated;
+
+  const LicenseScreen({
+    super.key,
+    required this.controller,
+    this.onLicenseActivated,
+  });
 
   @override
   State<LicenseScreen> createState() => _LicenseScreenState();
@@ -48,6 +53,7 @@ class _LicenseScreenState extends State<LicenseScreen> {
     } else {
       AppToast.success(context, 'License cryptographically verified and activated!');
       _jsonCtrl.clear();
+      widget.onLicenseActivated?.call();
     }
   }
 

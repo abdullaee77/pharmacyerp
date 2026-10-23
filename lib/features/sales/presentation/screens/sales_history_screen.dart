@@ -10,6 +10,7 @@ import '../../../users/domain/role.dart';
 import '../../domain/sale.dart';
 import '../controllers/sales_controller.dart';
 import '../widgets/sales_return_dialog.dart';
+import '../widgets/invoice_dialog.dart';
 
 class SalesHistoryScreen extends StatefulWidget {
   final SalesController controller;
@@ -53,6 +54,36 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
     if (result == true && mounted) {
       AppToast.success(context, 'Return processed successfully.');
     }
+  }
+
+  // âœ… FIX: Added Reprint Logic for old Sales Slips
+  // ✅ FIX: Use 'change' instead of 'changeAmount'
+  void _reprintSale(Sale sale) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => InvoiceDialog(
+        invoiceNumber: sale.invoiceNumber.value,
+        customerName: sale.customerName.isEmpty ? 'Walk-in Customer' : sale.customerName,
+        customerPhone: '', // Phone isn't usually stored in the Sale object directly
+        operatorName: sale.operatorName,
+        lines: sale.items.map((item) => InvoiceLineData(
+          medicineName: item.medicineName,
+          strength: item.medicineStrength,
+          batchNumber: item.batchNumber,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice.display,
+          lineTotal: item.lineTotal.display,
+        )).toList(),
+        subtotal: sale.subtotal.display,
+        discount: sale.discount.display,
+        grandTotal: sale.grandTotal.display,
+        amountReceived: sale.amountReceived.display,
+        change: sale.change.display, // Changed from sale.changeAmount to sale.change
+        paymentSummary: sale.status == SaleStatus.returned ? 'RETURNED' : 'PAID',
+        createdAt: sale.createdAt,
+      ),
+    );
   }
 
   @override
@@ -128,8 +159,7 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
             dataRowMaxHeight: 52,
             horizontalMargin: AppSpacing.lg,
             columnSpacing: AppSpacing.xl,
-            headingRowColor:
-            WidgetStatePropertyAll(AppColors.surfaceVariant),
+            headingRowColor: WidgetStatePropertyAll(AppColors.surfaceVariant),
             columns: const [
               DataColumn(label: Text('Invoice')),
               DataColumn(label: Text('Customer')),
@@ -157,8 +187,7 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                 cells: [
                   DataCell(Text(s.invoiceNumber.value,
                       style: AppTypography.subtitle.copyWith(fontSize: 13))),
-                  DataCell(Text(s.customerName,
-                      style: AppTypography.tableCell)),
+                  DataCell(Text(s.customerName, style: AppTypography.tableCell)),
                   DataCell(Text(
                     '${s.createdAt.day.toString().padLeft(2, '0')}/'
                         '${s.createdAt.month.toString().padLeft(2, '0')}/'
@@ -167,31 +196,41 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                         '${s.createdAt.minute.toString().padLeft(2, '0')}',
                     style: AppTypography.tableCell,
                   )),
-                  DataCell(Text('${s.items.length}',
-                      style: AppTypography.numeric)),
+                  DataCell(Text('${s.items.length}', style: AppTypography.numeric)),
                   DataCell(Text(
                     s.grandTotal.display,
-                    style: AppTypography.numeric
-                        .copyWith(fontWeight: FontWeight.w700),
+                    style: AppTypography.numeric.copyWith(fontWeight: FontWeight.w700),
                   )),
                   DataCell(AppBadge(
                       label: s.status.label,
                       variant: badgeVariant,
                       isDot: true)),
                   DataCell(
-                    PermissionGate.disable(
-                      widget.authController.currentUser,
-                      PermissionCategory.sales,
-                      PermissionAction.returnAction,
-                      AppButton(
-                        label: 'Return',
-                        icon: Icons.assignment_return_outlined,
-                        variant: AppButtonVariant.outlined,
-                        size: AppButtonSize.small,
-                        onPressed: s.status == SaleStatus.returned
-                            ? null
-                            : () => _openReturn(s),
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // âœ… FIX: Added Reprint Button next to Return
+                        IconButton(
+                          tooltip: 'View & Print Receipt',
+                          icon: const Icon(Icons.print_outlined, size: 20, color: AppColors.primary),
+                          onPressed: () => _reprintSale(s),
+                        ),
+                        const SizedBox(width: 8),
+                        PermissionGate.disable(
+                          widget.authController.currentUser,
+                          PermissionCategory.sales,
+                          PermissionAction.returnAction,
+                          AppButton(
+                            label: 'Return',
+                            icon: Icons.assignment_return_outlined,
+                            variant: AppButtonVariant.outlined,
+                            size: AppButtonSize.small,
+                            onPressed: s.status == SaleStatus.returned
+                                ? null
+                                : () => _openReturn(s),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],

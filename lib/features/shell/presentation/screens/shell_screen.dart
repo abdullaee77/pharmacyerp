@@ -12,6 +12,7 @@ import '../../../../core/widgets/permission_gate.dart';
 import '../../../../core/network/network_config.dart';
 import '../../../../core/network/data_sync_service.dart';
 import '../../../../core/network/api_server.dart';
+import '../../../../core/services/app_event_bus.dart';
 import '../../../accounts/data/sqlite_account_repository.dart';
 import '../../../accounts/data/http_account_repository.dart';
 import '../../../accounts/presentation/controllers/account_controller.dart';
@@ -129,6 +130,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
   late final List<Widget> _pages;
 
   Timer? _reloadDebounce;
+  StreamSubscription<AppEvent>? _categorySyncSubscription;
 
   late final bool _hasAccess;
   late final List<AdminSection> _adminSections;
@@ -303,6 +305,14 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
     } else {
       ApiServer.onServerDataChanged.addListener(_onRemoteDataChanged);
     }
+
+    _categorySyncSubscription = AppEventBus.instance.stream.listen((event) {
+      if (event == AppEvent.medicineUpdated ||
+          event == AppEvent.purchaseCompleted) {
+        _categoryController.loadAll(silent: true);
+      }
+    });
+
   }
 
   bool _can(PermissionCategory c, PermissionAction a) =>
@@ -529,6 +539,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
   @override
   void dispose() {
     _reloadDebounce?.cancel();
+    _categorySyncSubscription?.cancel();
     if (NetworkConfig.instance.isClient) {
       DataSyncService.instance.removeListener(_onRemoteDataChanged);
       DataSyncService.instance.stop();
