@@ -57,20 +57,23 @@ class SqliteReportRepository implements ReportRepository {
     }
   }
 
-  // ─── SALES REPORT ──────────────────────────────────────────
-
+  // ─── SALES REPORT (NET of returns) ────────────────────────────────
   Future<Result<ReportResult>> _salesReport(ReportFilter f) async {
     final db = await _db;
     final dw = _dateWhere('s.created_at', f);
     final da = _dateArgs(f);
 
+    // Pull sales + per-sale refund sum so each row is NET
     final rows = await db.rawQuery('''
-      SELECT s.invoice_number AS col0,
+      SELECT s.id AS sale_id,
+             s.invoice_number AS col0,
              s.customer_name AS col1,
              s.created_at AS col2,
-             s.grand_total AS col3,
+             s.grand_total AS gross,
              s.discount AS col4,
-             s.status AS col5
+             s.status AS col5,
+             COALESCE((SELECT SUM(total_refund) FROM sales_returns 
+                       WHERE original_sale_id = s.id), 0) AS refund
       FROM sales s
       ${dw != null ? 'WHERE $dw' : ''}
       ORDER BY s.created_at DESC
@@ -78,59 +81,101 @@ class SqliteReportRepository implements ReportRepository {
 
     int totalRevenue = 0;
     int totalDiscount = 0;
+    int totalReturns = 0;
+
     final resultRows = rows.map((r) {
-      totalRevenue += (r['col3'] as num).toInt();
+      final gross = (r['gross'] as num).toInt();
+      final refund = (r['refund'] as num).toInt();
+      final net = gross - refund;
+
+      totalRevenue += net;
       totalDiscount += (r['col4'] as num).toInt();
-      return ReportRow(r);
+      totalReturns += refund;
+
+      return ReportRow({
+        'col0': r['col0'],
+        'col1': r['col1'],
+        'col2': r['col2'],
+        'col3': net, // ← NET total shown in report
+        'col4': r['col4'],
+        'col5': r['col5'],
+      });
     }).toList();
 
     return Success(ReportResult(
       type: ReportType.sales,
-      headers: ['Invoice', 'Customer', 'Date', 'Total', 'Discount', 'Status'],
+      headers: [
+        'Invoice',
+        'Customer',
+        'Date',
+        'Net Total',
+        'Discount',
+        'Status'
+      ],
       rows: resultRows,
       summaryTotals: {
-        'Revenue': Money.fromPaisa(totalRevenue),
+        'Gross Revenue': Money.fromPaisa(totalRevenue + totalReturns),
+        'Returns': Money.fromPaisa(totalReturns),
+        'Net Revenue': Money.fromPaisa(totalRevenue),
         'Discount': Money.fromPaisa(totalDiscount),
       },
       totalRowCount: resultRows.length,
     ));
   }
 
-  // ─── PURCHASE REPORT ───────────────────────────────────────
-
+  // ─── PURCHASE REPORT ──────────────────────────────────────────────
   Future<Result<ReportResult>> _purchaseReport(ReportFilter f) async {
     final db = await _db;
     final dw = _dateWhere('p.created_at', f);
     final da = _dateArgs(f);
 
     final rows = await db.rawQuery('''
-      SELECT p.invoice_number AS col0,
+      SELECT p.id AS purchase_id,
+             p.invoice_number AS col0,
              p.supplier_name AS col1,
              p.created_at AS col2,
-             p.grand_total AS col3,
-             p.status AS col4
+             p.grand_total AS gross,
+             p.status AS col4,
+             COALESCE((SELECT SUM(total_refund) FROM purchase_returns 
+                       WHERE original_purchase_id = p.id), 0) AS refund
       FROM purchases p
       ${dw != null ? 'WHERE $dw' : ''}
       ORDER BY p.created_at DESC
     ''', da);
 
     int totalCost = 0;
+    int totalReturns = 0;
     final resultRows = rows.map((r) {
-      totalCost += (r['col3'] as num).toInt();
-      return ReportRow(r);
+      final gross = (r['gross'] as num).toInt();
+      final refund = (r['refund'] as num).toInt();
+      final net = gross - refund;
+
+      totalCost += net;
+      totalReturns += refund;
+
+      return ReportRow({
+        'col0': r['col0'],
+        'col1': r['col1'],
+        'col2': r['col2'],
+        'col3': net,
+        'col4': r['col4'],
+      });
     }).toList();
 
     return Success(ReportResult(
       type: ReportType.purchases,
-      headers: ['Invoice', 'Supplier', 'Date', 'Total', 'Status'],
+      headers: ['Invoice', 'Supplier', 'Date', 'Net Total', 'Status'],
       rows: resultRows,
-      summaryTotals: {'Total Cost': Money.fromPaisa(totalCost)},
+      summaryTotals: {
+        'Gross Cost': Money.fromPaisa(totalCost + totalReturns),
+        'Returns': Money.fromPaisa(totalReturns),
+        'Net Cost': Money.fromPaisa(totalCost),
+      },
       totalRowCount: resultRows.length,
     ));
   }
 
-  // ─── PROFIT REPORT ─────────────────────────────────────────
-
+  // ─── PROFIT REPORT (NET of sales returns) ─────────────────────────
   Future<Result<ReportResult>> _profitReport(ReportFilter f) async {
     final db = await _db;
     final dw = _dateWhere('s.created_at', f);
@@ -159,9 +204,30 @@ class SqliteReportRepository implements ReportRepository {
       GROUP BY si.medicine_name
     ''', da);
 
+    // SALES RETURN per medicine — subtract from revenue AND units
+    final returnDw = _dateWhere('r.created_at', f);
+    final returnDa = _dateArgs(f);
+    final returnRows = await db.rawQuery('''
+      SELECT ri.medicine_name AS name,
+             SUM(ri.quantity) AS qty,
+             SUM(ri.refund_amount) AS refund
+      FROM sales_return_items ri
+      JOIN sales_returns r ON ri.return_id = r.id
+      ${returnDw != null ? 'WHERE $returnDw' : ''}
+      GROUP BY ri.medicine_name
+    ''', returnDa);
+
     final cogsMap = <String, int>{};
     for (final r in cogsRows) {
       cogsMap[r['name'] as String] = (r['cogs'] as num).toInt();
+    }
+
+    final returnQtyMap = <String, int>{};
+    final returnRevMap = <String, int>{};
+    for (final r in returnRows) {
+      final name = r['name'] as String;
+      returnQtyMap[name] = (r['qty'] as num).toInt();
+      returnRevMap[name] = (r['refund'] as num).toInt();
     }
 
     int totalRevenue = 0;
@@ -170,29 +236,37 @@ class SqliteReportRepository implements ReportRepository {
 
     for (final r in revenueRows) {
       final name = r['col0'] as String;
-      final qty = (r['col1'] as num).toInt();
-      final rev = (r['col2'] as num).toInt();
+      final grossQty = (r['col1'] as num).toInt();
+      final grossRev = (r['col2'] as num).toInt();
       final cogs = cogsMap[name] ?? 0;
-      final profit = rev - cogs;
 
-      totalRevenue += rev;
-      totalCogs += cogs;
+      final retQty = returnQtyMap[name] ?? 0;
+      final retRev = returnRevMap[name] ?? 0;
+
+      final netQty = grossQty - retQty;
+      final netRev = grossRev - retRev;
+      // Reduce COGS proportionally for returned units
+      final netCogs = grossQty > 0 ? (cogs * netQty / grossQty).round() : 0;
+      final profit = netRev - netCogs;
+
+      totalRevenue += netRev;
+      totalCogs += netCogs;
 
       resultRows.add(ReportRow({
         'col0': name,
-        'col1': qty,
-        'col2': rev,
-        'col3': cogs,
+        'col1': netQty,
+        'col2': netRev,
+        'col3': netCogs,
         'col4': profit,
       }));
     }
 
     return Success(ReportResult(
       type: ReportType.profit,
-      headers: ['Medicine', 'Qty Sold', 'Revenue', 'COGS', 'Profit'],
+      headers: ['Medicine', 'Net Qty', 'Net Revenue', 'COGS', 'Profit'],
       rows: resultRows,
       summaryTotals: {
-        'Revenue': Money.fromPaisa(totalRevenue),
+        'Net Revenue': Money.fromPaisa(totalRevenue),
         'COGS': Money.fromPaisa(totalCogs),
         'Gross Profit': Money.fromPaisa(totalRevenue - totalCogs),
       },
@@ -200,8 +274,7 @@ class SqliteReportRepository implements ReportRepository {
     ));
   }
 
-  // ─── INVENTORY REPORT ──────────────────────────────────────
-
+  // ─── INVENTORY REPORT ─────────────────────────────────────────────
   Future<Result<ReportResult>> _inventoryReport(ReportFilter f) async {
     final db = await _db;
 
@@ -239,8 +312,7 @@ class SqliteReportRepository implements ReportRepository {
     ));
   }
 
-  // ─── EXPIRY REPORT ─────────────────────────────────────────
-
+  // ─── EXPIRY REPORT ────────────────────────────────────────────────
   Future<Result<ReportResult>> _expiryReport(ReportFilter f) async {
     final db = await _db;
 
@@ -281,8 +353,7 @@ class SqliteReportRepository implements ReportRepository {
     ));
   }
 
-  // ─── CUSTOMER REPORT ───────────────────────────────────────
-
+  // ─── CUSTOMER REPORT ──────────────────────────────────────────────
   Future<Result<ReportResult>> _customerReport(ReportFilter f) async {
     final db = await _db;
 
@@ -312,8 +383,7 @@ class SqliteReportRepository implements ReportRepository {
     ));
   }
 
-  // ─── SUPPLIER REPORT ───────────────────────────────────────
-
+  // ─── SUPPLIER REPORT ──────────────────────────────────────────────
   Future<Result<ReportResult>> _supplierReport(ReportFilter f) async {
     final db = await _db;
 
@@ -343,8 +413,7 @@ class SqliteReportRepository implements ReportRepository {
     ));
   }
 
-  // ─── ACCOUNT REPORT ────────────────────────────────────────
-
+  // ─── ACCOUNT REPORT ───────────────────────────────────────────────
   Future<Result<ReportResult>> _accountReport(ReportFilter f) async {
     final db = await _db;
 
@@ -378,39 +447,44 @@ class SqliteReportRepository implements ReportRepository {
     ));
   }
 
-  // ─── BUSINESS METRICS ──────────────────────────────────────
-
+  // ─── BUSINESS METRICS (NET of sales & purchase returns) ───────────
   @override
   Future<Result<BusinessMetrics>> getBusinessMetrics() async {
     try {
       final db = await _db;
       final now = DateTime.now();
-      final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
+      final startOfDay =
+      DateTime(now.year, now.month, now.day).toIso8601String();
+      final endOfDay =
+      DateTime(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
       final startOfMonth = DateTime(now.year, now.month, 1).toIso8601String();
 
-      // Revenue
-      final todayRev = await _sumColumn(db, 'sales', 'grand_total', 'created_at', startOfDay);
-      final monthRev = await _sumColumn(db, 'sales', 'grand_total', 'created_at', startOfMonth);
+      // Revenue (NET of sales returns)
+      final todayRev = await _netRevenueSince(db, startOfDay, endOfDay);
+      final monthRev = await _netRevenueSince(db, startOfMonth, null);
       final todayTx = await _countRows(db, 'sales', 'created_at', startOfDay);
 
-      // Purchases
-      final monthPur = await _sumColumn(db, 'purchases', 'grand_total', 'created_at', startOfMonth);
+      // Purchases (NET of purchase returns)
+      final monthPur = await _netPurchasesSince(db, startOfMonth);
 
       // Expenses
-      final monthExp = await _sumColumn(db, 'expenses', 'amount', 'expense_date', startOfMonth);
+      final monthExp = await _sumColumn(
+          db, 'expenses', 'amount', 'expense_date', startOfMonth);
 
       // Receivables & Payables
       final recRows = await db.rawQuery('''
         SELECT COALESCE(SUM(debit), 0) - COALESCE(SUM(credit), 0) AS bal
         FROM customer_ledger_entries
       ''');
-      final receivables = recRows.isEmpty ? 0 : (recRows.first['bal'] as num).toInt();
+      final receivables =
+      recRows.isEmpty ? 0 : (recRows.first['bal'] as num).toInt();
 
       final payRows = await db.rawQuery('''
         SELECT COALESCE(SUM(credit), 0) - COALESCE(SUM(debit), 0) AS bal
         FROM supplier_ledger_entries
       ''');
-      final payables = payRows.isEmpty ? 0 : (payRows.first['bal'] as num).toInt();
+      final payables =
+      payRows.isEmpty ? 0 : (payRows.first['bal'] as num).toInt();
 
       // Stock value
       final stockRows = await db.rawQuery('''
@@ -420,10 +494,12 @@ class SqliteReportRepository implements ReportRepository {
         LEFT JOIN inventory_stocks s ON m.id = s.medicine_id
         WHERE m.status = 'active'
       ''');
-      final stockValue = stockRows.isEmpty ? 0 : (stockRows.first['val'] as num).toInt();
-      final totalMeds = stockRows.isEmpty ? 0 : (stockRows.first['meds'] as num).toInt();
+      final stockValue =
+      stockRows.isEmpty ? 0 : (stockRows.first['val'] as num).toInt();
+      final totalMeds =
+      stockRows.isEmpty ? 0 : (stockRows.first['meds'] as num).toInt();
 
-      // Low stock (FIXED: LEFT JOIN + Fallback default threshold of 10 if min_stock_level is 0)
+      // Low stock
       final lowRows = await db.rawQuery('''
         SELECT COUNT(*) AS cnt
         FROM medicines m
@@ -434,39 +510,45 @@ class SqliteReportRepository implements ReportRepository {
                 ELSE m.min_stock_level
               END
       ''');
-      final lowCount = lowRows.isEmpty ? 0 : (lowRows.first['cnt'] as num).toInt();
+      final lowCount =
+      lowRows.isEmpty ? 0 : (lowRows.first['cnt'] as num).toInt();
 
       // Expiry
       final expRows = await db.rawQuery('''
         SELECT COUNT(*) AS cnt FROM batches
         WHERE expiry_date < ? AND quantity > 0
       ''', [now.toIso8601String()]);
-      final expiredCount = expRows.isEmpty ? 0 : (expRows.first['cnt'] as num).toInt();
+      final expiredCount =
+      expRows.isEmpty ? 0 : (expRows.first['cnt'] as num).toInt();
 
       final soonRows = await db.rawQuery('''
         SELECT COUNT(*) AS cnt FROM batches
         WHERE expiry_date >= ? AND expiry_date <= ? AND quantity > 0
-      ''', [now.toIso8601String(), now.add(const Duration(days: 90)).toIso8601String()]);
-      final expiringCount = soonRows.isEmpty ? 0 : (soonRows.first['cnt'] as num).toInt();
+      ''', [
+        now.toIso8601String(),
+        now.add(const Duration(days: 90)).toIso8601String()
+      ]);
+      final expiringCount =
+      soonRows.isEmpty ? 0 : (soonRows.first['cnt'] as num).toInt();
 
-      // Sales trend (last 7 days)
+      // Sales trend (last 7 days — NET of returns)
       final trend = <DailyTrend>[];
       for (int i = 6; i >= 0; i--) {
         final day = now.subtract(Duration(days: i));
-        final dayStart = DateTime(day.year, day.month, day.day).toIso8601String();
-        final dayEnd = DateTime(day.year, day.month, day.day, 23, 59, 59).toIso8601String();
-        final tRows = await db.rawQuery('''
-          SELECT COALESCE(SUM(grand_total), 0) AS total
-          FROM sales WHERE created_at >= ? AND created_at <= ?
-        ''', [dayStart, dayEnd]);
-        final total = tRows.isEmpty ? 0 : (tRows.first['total'] as num).toInt();
+        final dayStart =
+        DateTime(day.year, day.month, day.day).toIso8601String();
+        final dayEnd = DateTime(day.year, day.month, day.day, 23, 59, 59)
+            .toIso8601String();
+
+        final netDay = await _netRevenueSince(db, dayStart, dayEnd);
+
         trend.add(DailyTrend(
           dateLabel: '${day.day}/${day.month}',
-          revenue: Money.fromPaisa(total),
+          revenue: Money.fromPaisa(netDay),
         ));
       }
 
-      // Top selling (this month)
+      // Top selling (this month — NET of returns)
       final topRows = await db.rawQuery('''
         SELECT si.medicine_name AS name,
                SUM(si.quantity) AS qty,
@@ -476,14 +558,45 @@ class SqliteReportRepository implements ReportRepository {
         WHERE s.created_at >= ?
         GROUP BY si.medicine_name
         ORDER BY rev DESC
-        LIMIT 5
+        LIMIT 10
       ''', [startOfMonth]);
 
-      final topSelling = topRows.map((r) => CategoryBreakdown(
-        name: r['name'] as String,
-        quantity: (r['qty'] as num).toInt(),
-        revenue: Money.fromPaisa((r['rev'] as num).toInt()),
-      )).toList();
+      // Subtract returns per medicine
+      final topReturnRows = await db.rawQuery('''
+        SELECT ri.medicine_name AS name,
+               SUM(ri.quantity) AS qty,
+               SUM(ri.refund_amount) AS refund
+        FROM sales_return_items ri
+        JOIN sales_returns r ON ri.return_id = r.id
+        WHERE r.created_at >= ?
+        GROUP BY ri.medicine_name
+      ''', [startOfMonth]);
+
+      final retQtyByName = <String, int>{};
+      final retRevByName = <String, int>{};
+      for (final r in topReturnRows) {
+        final n = r['name'] as String;
+        retQtyByName[n] = (r['qty'] as num).toInt();
+        retRevByName[n] = (r['refund'] as num).toInt();
+      }
+
+      final topSellingNet = <CategoryBreakdown>[];
+      for (final r in topRows) {
+        final name = r['name'] as String;
+        final grossQty = (r['qty'] as num).toInt();
+        final grossRev = (r['rev'] as num).toInt();
+        final netQty = grossQty - (retQtyByName[name] ?? 0);
+        final netRev = grossRev - (retRevByName[name] ?? 0);
+        if (netQty <= 0 || netRev <= 0) continue;
+        topSellingNet.add(CategoryBreakdown(
+          name: name,
+          quantity: netQty,
+          revenue: Money.fromPaisa(netRev),
+        ));
+      }
+      // Sort by net revenue desc and keep top 5
+      topSellingNet.sort((a, b) => b.revenue.paisa.compareTo(a.revenue.paisa));
+      final topSelling = topSellingNet.take(5).toList();
 
       final profit = monthRev - monthPur - monthExp;
 
@@ -493,7 +606,8 @@ class SqliteReportRepository implements ReportRepository {
         monthPurchases: Money.fromPaisa(monthPur),
         monthExpenses: Money.fromPaisa(monthExp),
         monthProfit: Money.fromPaisa(profit),
-        totalReceivables: Money.fromPaisa(receivables > 0 ? receivables : 0),
+        totalReceivables:
+        Money.fromPaisa(receivables > 0 ? receivables : 0),
         totalPayables: Money.fromPaisa(payables > 0 ? payables : 0),
         stockValue: Money.fromPaisa(stockValue),
         totalMedicines: totalMeds,
@@ -507,6 +621,50 @@ class SqliteReportRepository implements ReportRepository {
     } catch (e) {
       return Failure(DatabaseFailure(message: 'Failed to compute metrics: $e'));
     }
+  }
+
+  // ─── HELPERS ──────────────────────────────────────────────────────
+
+  /// Net revenue = SUM(sales.grand_total) − SUM(sales_returns.total_refund)
+  /// within the given date window.
+  Future<int> _netRevenueSince(
+      Database db,
+      String since,
+      String? until,
+      ) async {
+    final salesSql = until == null
+        ? 'SELECT COALESCE(SUM(grand_total), 0) AS total FROM sales WHERE created_at >= ?'
+        : 'SELECT COALESCE(SUM(grand_total), 0) AS total FROM sales WHERE created_at >= ? AND created_at <= ?';
+    final salesArgs = until == null ? [since] : [since, until];
+
+    final returnsSql = until == null
+        ? 'SELECT COALESCE(SUM(total_refund), 0) AS total FROM sales_returns WHERE created_at >= ?'
+        : 'SELECT COALESCE(SUM(total_refund), 0) AS total FROM sales_returns WHERE created_at >= ? AND created_at <= ?';
+    final returnsArgs = until == null ? [since] : [since, until];
+
+    final sRows = await db.rawQuery(salesSql, salesArgs);
+    final rRows = await db.rawQuery(returnsSql, returnsArgs);
+
+    final gross = sRows.isEmpty ? 0 : (sRows.first['total'] as num).toInt();
+    final returned =
+    rRows.isEmpty ? 0 : (rRows.first['total'] as num).toInt();
+    return gross - returned;
+  }
+
+  /// Net purchases = SUM(purchases.grand_total) − SUM(purchase_returns.total_refund)
+  Future<int> _netPurchasesSince(Database db, String since) async {
+    final pRows = await db.rawQuery(
+      'SELECT COALESCE(SUM(grand_total), 0) AS total FROM purchases WHERE created_at >= ?',
+      [since],
+    );
+    final rRows = await db.rawQuery(
+      'SELECT COALESCE(SUM(total_refund), 0) AS total FROM purchase_returns WHERE created_at >= ?',
+      [since],
+    );
+    final gross = pRows.isEmpty ? 0 : (pRows.first['total'] as num).toInt();
+    final returned =
+    rRows.isEmpty ? 0 : (rRows.first['total'] as num).toInt();
+    return gross - returned;
   }
 
   Future<int> _sumColumn(

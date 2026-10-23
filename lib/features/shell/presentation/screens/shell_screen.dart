@@ -264,6 +264,7 @@ class _ShellScreenState extends State<ShellScreen> with TickerProviderStateMixin
         NavigationItem.medicines,
             () => MedicineListScreen(
           controller: _medicineController,
+          batchController: _batchController,
           authController: widget.authController,
         ),
       ),

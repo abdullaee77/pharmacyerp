@@ -261,12 +261,29 @@ class PosCartController extends ChangeNotifier {
     notifyListeners();
     return true;
   }
+  /// Old API kept so other callers still compile.
+  bool updateDiscount(CartItemId id, int percent) =>
+      updateDiscountPercent(id, percent.toDouble());
 
-  bool updateDiscount(CartItemId id, int percent) {
-    final clamped = percent.clamp(0, 100);
+  /// User typed a percentage -> discount amount is derived from it.
+  bool updateDiscountPercent(CartItemId id, double percent) {
     final idx = _items.indexWhere((i) => i.id == id);
     if (idx < 0) return false;
+    final clamped = percent.clamp(0.0, 100.0).toDouble();
     _items[idx] = _items[idx].copyWith(discountPercent: clamped);
+    if (_selectedLine?.id == id) _selectedLine = _items[idx];
+    notifyListeners();
+    return true;
+  }
+
+  /// User typed a discount price (in paisa) -> percentage is derived from it.
+  bool updateDiscountAmount(CartItemId id, int amountPaisa) {
+    final idx = _items.indexWhere((i) => i.id == id);
+    if (idx < 0) return false;
+    final gross = _items[idx].grossTotal.paisa;
+    final clampedPaisa = amountPaisa.clamp(0, gross);
+    final pct = gross == 0 ? 0.0 : (clampedPaisa * 100 / gross);
+    _items[idx] = _items[idx].copyWith(discountPercent: pct);
     if (_selectedLine?.id == id) _selectedLine = _items[idx];
     notifyListeners();
     return true;

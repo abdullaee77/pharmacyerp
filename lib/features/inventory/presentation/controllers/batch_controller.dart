@@ -117,7 +117,35 @@ class BatchController extends ChangeNotifier {
       onFailure: (f) => f.message,
     );
   }
+  /// Creates many batches; refreshes and notifies once at the end.
+  Future<String> bulkCreateBatches(List<Batch> batches) async {
+    var ok = 0;
+    final errors = <String>[];
 
+    for (final b in batches) {
+      final result = await _createBatch.execute(b);
+      final err = result.fold(
+        onSuccess: (_) => null,
+        onFailure: (f) => f.message,
+      );
+      if (err == null) {
+        ok++;
+      } else {
+        errors.add('${b.medicineName} / ${b.batchNumber.value}: $err');
+      }
+    }
+
+    await loadBatches(silent: true);
+    if (ok > 0) {
+      AppEventBus.instance.fire(AppEvent.batchChanged);
+      AppEventBus.instance.fire(AppEvent.inventoryAdjusted);
+    }
+
+    if (errors.isEmpty) {
+      return 'Imported $ok batch${ok == 1 ? '' : 'es'} successfully.';
+    }
+    return 'Imported $ok, failed ${errors.length}.\n${errors.take(3).join("\n")}';
+  }
   @override
   void dispose() {
     _eventSubscription?.cancel();

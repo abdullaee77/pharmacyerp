@@ -37,14 +37,11 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
   String? _fileName;
   bool _loading = false;
   bool _previewingSample = false;
+  bool _downloadingSample = false;
   bool _isSampleLoaded = false;
   bool _showFormatHelp = false;
   String? _error;
 
-  // Twin controllers for header/body horizontal scroll sync.
-  // A single shared ScrollController cannot be attached to two
-  // Scrollable widgets and auto-mirror drags — Flutter doesn't support
-  // that. Instead we listen to one and manually jumpTo() the other.
   final ScrollController _headerHScroll = ScrollController();
   final ScrollController _bodyHScroll = ScrollController();
   bool _isSyncingScroll = false;
@@ -69,6 +66,61 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
     'prescription_required',
   ];
 
+  /// Fallback sample rows if asset is missing.
+  static const _sampleDataRows = [
+    [
+      'Panadol',
+      'Paracetamol',
+      'GSK',
+      'Tablet',
+      '500mg',
+      'Analgesic',
+      'Tab',
+      'A-01',
+      '2.50',
+      '4.00',
+      '5.00',
+      '20',
+      '10',
+      '',
+      'no',
+    ],
+    [
+      'Augmentin',
+      'Amoxicillin + Clavulanic Acid',
+      'GSK',
+      'Tablet',
+      '625mg',
+      'Antibiotic',
+      'Tab',
+      'B-03',
+      '25.00',
+      '35.00',
+      '40.00',
+      '14',
+      '5',
+      '',
+      'yes',
+    ],
+    [
+      'Disprin',
+      'Aspirin',
+      'Reckitt',
+      'Tablet',
+      '300mg',
+      'Analgesic',
+      'Tab',
+      'A-02',
+      '1.20',
+      '2.00',
+      '2.50',
+      '10',
+      '20',
+      '',
+      'no',
+    ],
+  ];
+
   static const List<double> _columnWidths = [
     150, // name
     170, // generic_name
@@ -90,7 +142,7 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
   static const double _rowNumColWidth = 48;
   static const double _statusColWidth = 44;
 
-  bool get _isBusy => _loading || _previewingSample;
+  bool get _isBusy => _loading || _previewingSample || _downloadingSample;
   bool get _hasData => _rows.isNotEmpty;
 
   @override
@@ -163,6 +215,61 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
     return parsed;
   }
 
+  Future<String> _buildSampleCsvContent() async {
+    // Prefer the asset template if present; otherwise generate headers + samples.
+    try {
+      final content = await rootBundle.loadString(_sampleAssetPath);
+      if (content.trim().isNotEmpty) return content;
+    } catch (_) {}
+
+    final table = <List<String>>[
+      List<String>.from(_headers),
+      ..._sampleDataRows.map((r) => List<String>.from(r)),
+    ];
+    return const ListToCsvConverter().convert(table);
+  }
+
+  Future<void> _downloadSample() async {
+    setState(() {
+      _downloadingSample = true;
+      _error = null;
+    });
+
+    try {
+      final csvContent = await _buildSampleCsvContent();
+
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save medicines import template',
+        fileName: 'medicines_import_template.csv',
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+      );
+
+      if (savePath == null) {
+        // User cancelled
+        setState(() => _downloadingSample = false);
+        return;
+      }
+
+      final path = savePath.toLowerCase().endsWith('.csv')
+          ? savePath
+          : '$savePath.csv';
+
+      final file = File(path);
+      await file.writeAsString(csvContent);
+
+      if (!mounted) return;
+      setState(() => _downloadingSample = false);
+      AppToast.success(context, 'Sample template saved to:\n$path');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _downloadingSample = false;
+        _error = 'Failed to download sample: $e';
+      });
+    }
+  }
+
   Future<void> _previewSample() async {
     setState(() {
       _previewingSample = true;
@@ -171,7 +278,7 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
     });
 
     try {
-      final content = await rootBundle.loadString(_sampleAssetPath);
+      final content = await _buildSampleCsvContent();
       final raw = const CsvToListConverter(
         eol: '\n',
         shouldParseNumbers: false,
@@ -192,7 +299,7 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
         _previewingSample = false;
         _error = 'Could not load sample data. Make sure '
             '$_sampleAssetPath is declared under pubspec.yaml > flutter > '
-            'assets.';
+            'assets, or use Download Sample Template.';
       });
     }
   }
@@ -525,16 +632,34 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
                     ],
                   ),
                   const SizedBox(height: AppSpacing.lg),
-                  AppButton(
-                    label: 'Preview Sample Data',
-                    icon: Icons.auto_awesome_rounded,
-                    variant: AppButtonVariant.outlined,
-                    isFullWidth: true,
-                    onPressed: _previewSample,
+
+                  // Preview + Download side by side
+                  Row(
+                    children: [
+                      Expanded(
+                        child: AppButton(
+                          label: 'Preview Sample',
+                          icon: Icons.visibility_rounded,
+                          variant: AppButtonVariant.outlined,
+                          isFullWidth: true,
+                          onPressed: _previewSample,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: AppButton(
+                          label: 'Download Sample',
+                          icon: Icons.download_rounded,
+                          variant: AppButtonVariant.outlined,
+                          isFullWidth: true,
+                          onPressed: _downloadSample,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   Text(
-                    'See example medicines before importing your own file',
+                    'Preview in-app, or download a CSV template to fill and import',
                     textAlign: TextAlign.center,
                     style: AppTypography.caption
                         .copyWith(color: AppColors.textSecondary),
@@ -570,6 +695,14 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
                 style: AppTypography.body.copyWith(fontWeight: FontWeight.w600),
                 overflow: TextOverflow.ellipsis,
               ),
+            ),
+            // Also allow download while reviewing sample
+            AppButton(
+              label: 'Download',
+              icon: Icons.download_rounded,
+              variant: AppButtonVariant.ghost,
+              size: AppButtonSize.small,
+              onPressed: _downloadSample,
             ),
             AppButton(
               label: 'Start Over',
@@ -663,10 +796,6 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
     );
   }
 
-  // -----------------------------------------------------------------------
-  // Excel/CSV-style grid preview with a header row that stays visually
-  // in sync with the body's horizontal scroll via twin ScrollControllers.
-  // -----------------------------------------------------------------------
   Widget _buildSpreadsheetTable() {
     final totalWidth = _rowNumColWidth +
         _statusColWidth +
@@ -680,9 +809,6 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          // Header row — not directly draggable (NeverScrollableScrollPhysics),
-          // but its controller is still jumped programmatically whenever the
-          // body below is dragged, via _onBodyScroll().
           SingleChildScrollView(
             controller: _headerHScroll,
             scrollDirection: Axis.horizontal,
@@ -693,9 +819,6 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
             ),
           ),
           const Divider(height: 1, thickness: 1),
-          // Body — vertical scroll outer, horizontal scroll inner.
-          // Dragging here fires _onBodyScroll(), which mirrors the
-          // offset onto the header controller above.
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.vertical,
@@ -755,7 +878,9 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
     final isEven = index % 2 == 0;
     final bg = !r.isOk
         ? AppColors.error.withValues(alpha: 0.07)
-        : (isEven ? Colors.transparent : AppColors.border.withValues(alpha: 0.12));
+        : (isEven
+        ? Colors.transparent
+        : AppColors.border.withValues(alpha: 0.12));
 
     return Container(
       color: bg,
@@ -878,7 +1003,8 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
             decoration: BoxDecoration(
               color: AppColors.info.withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(AppRadius.sm),
-              border: Border.all(color: AppColors.info.withValues(alpha: 0.25)),
+              border:
+              Border.all(color: AppColors.info.withValues(alpha: 0.25)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -54,6 +54,50 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
   }
 
+  Future<void> _handleExportPdf() async {
+    final path = await widget.controller.exportToPdf();
+    if (!mounted) return;
+    if (path != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF exported successfully'),
+          backgroundColor: AppColors.success,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else if (widget.controller.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.controller.error!),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleExportExcel() async {
+    final path = await widget.controller.exportToExcel();
+    if (!mounted) return;
+    if (path != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Excel exported successfully'),
+          backgroundColor: AppColors.success,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else if (widget.controller.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.controller.error!),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -61,6 +105,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       builder: (context, _) {
         final ctrl = widget.controller;
         final report = ctrl.currentReport;
+        final hasData = report != null && report.rows.isNotEmpty;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,8 +145,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       labelStyle: TextStyle(
                         fontWeight:
                         selected ? FontWeight.w700 : FontWeight.w500,
-                        color:
-                        selected ? AppColors.primary : AppColors.textSecondary,
+                        color: selected
+                            ? AppColors.primary
+                            : AppColors.textSecondary,
                       ),
                     ),
                   );
@@ -110,7 +156,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ),
             const SizedBox(height: AppSpacing.md),
 
-            // Date filter
+            // Date filter + Export buttons
             Row(
               children: [
                 OutlinedButton.icon(
@@ -126,6 +172,52 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     '${report.totalRowCount} rows',
                     style: AppTypography.caption,
                   ),
+                const SizedBox(width: AppSpacing.md),
+
+                // ── EXPORT BUTTONS ──
+                if (hasData) ...[
+                  FilledButton.icon(
+                    onPressed: ctrl.isExporting ? null : _handleExportExcel,
+                    icon: ctrl.isExporting
+                        ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                        : const Icon(Icons.table_chart_rounded, size: 16),
+                    label: const Text('Excel'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF217346),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  FilledButton.icon(
+                    onPressed: ctrl.isExporting ? null : _handleExportPdf,
+                    icon: ctrl.isExporting
+                        ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                        : const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                    label: const Text('PDF'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFD32F2F),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -179,7 +271,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (ctrl.isLoading) {
       return const AppLoading(message: 'Generating report...');
     }
-    if (ctrl.error != null) {
+    if (ctrl.error != null && ctrl.currentReport == null) {
       return AppEmptyState(
         icon: Icons.error_outline_rounded,
         title: ctrl.error!,
@@ -212,7 +304,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
             dataRowMaxHeight: 48,
             horizontalMargin: AppSpacing.md,
             columnSpacing: AppSpacing.lg,
-            headingRowColor: const WidgetStatePropertyAll(AppColors.surfaceVariant),
+            headingRowColor:
+            const WidgetStatePropertyAll(AppColors.surfaceVariant),
             columns: report.headers
                 .map((h) => DataColumn(
               label: Text(h, style: AppTypography.tableHeader),

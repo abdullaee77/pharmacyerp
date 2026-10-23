@@ -192,7 +192,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
       batchNumber: ci.batch.batchNumber.value,
       quantity: ci.quantity,
       unitPrice: ci.unitPrice,
-      discountPercent: ci.discountPercent,
+      discountPercent: ci.discountPercent.round(),
       lineTotal: ci.lineTotal,
     )).toList();
 

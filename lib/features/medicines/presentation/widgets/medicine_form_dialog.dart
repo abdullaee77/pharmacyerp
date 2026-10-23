@@ -7,15 +7,21 @@ import '../../../../core/widgets/components.dart';
 import '../../domain/medicine.dart';
 import '../../domain/value_objects.dart';
 
+/// Optional opening batch entered together with a new medicine.
+/// Prices are optional: when null the medicine's own prices are used.
 class OpeningStockInfo {
   final String batchNumber;
   final DateTime expiryDate;
   final int quantity;
+  final Money? purchasePrice;
+  final Money? sellingPrice;
 
   const OpeningStockInfo({
     required this.batchNumber,
     required this.expiryDate,
     required this.quantity,
+    this.purchasePrice,
+    this.sellingPrice,
   });
 }
 
@@ -81,6 +87,14 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
   late final TextEditingController _rackCtrl;
   late final TextEditingController _storageCtrl;
 
+  // Opening batch (optional, only when adding a new medicine)
+  bool _addBatch = false;
+  late final TextEditingController _batchNoCtrl;
+  late final TextEditingController _batchQtyCtrl;
+  late final TextEditingController _batchPurchaseCtrl;
+  late final TextEditingController _batchSellingCtrl;
+  DateTime _batchExpiry = DateTime.now().add(const Duration(days: 365));
+
   bool get _isEditing => widget.medicine != null;
 
   static const _units = [
@@ -95,6 +109,13 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
     'Box',
     'Piece',
   ];
+
+  /// Standard units plus the medicine's current unit (e.g. "Tablet"),
+  /// so the dropdown always contains the selected value exactly once.
+  List<String> get _unitOptions => <String>{
+    ..._units,
+    if (_unit.trim().isNotEmpty) _unit,
+  }.toList();
 
   @override
   void initState() {
@@ -169,6 +190,11 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
 
     _rackCtrl = TextEditingController(text: m?.rackLocation ?? '');
     _storageCtrl = TextEditingController(text: m?.storageInstructions ?? '');
+
+    _batchNoCtrl = TextEditingController();
+    _batchQtyCtrl = TextEditingController();
+    _batchPurchaseCtrl = TextEditingController();
+    _batchSellingCtrl = TextEditingController();
   }
 
   @override
@@ -187,6 +213,10 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
     _minStockCtrl.dispose();
     _rackCtrl.dispose();
     _storageCtrl.dispose();
+    _batchNoCtrl.dispose();
+    _batchQtyCtrl.dispose();
+    _batchPurchaseCtrl.dispose();
+    _batchSellingCtrl.dispose();
     super.dispose();
   }
 
@@ -209,6 +239,16 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
       final boxPrice = unitPrice * boxSize;
       _boxPriceCtrl.text = boxPrice.toStringAsFixed(2);
     }
+  }
+
+  Future<void> _pickBatchExpiry() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _batchExpiry,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2040),
+    );
+    if (picked != null) setState(() => _batchExpiry = picked);
   }
 
   void _save() {
@@ -243,9 +283,22 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
       updatedAt: now,
     );
 
+    OpeningStockInfo? openingStock;
+    if (!_isEditing && _addBatch) {
+      final pText = _batchPurchaseCtrl.text.trim();
+      final sText = _batchSellingCtrl.text.trim();
+      openingStock = OpeningStockInfo(
+        batchNumber: _batchNoCtrl.text.trim(),
+        expiryDate: _batchExpiry,
+        quantity: _parseInt(_batchQtyCtrl.text),
+        purchasePrice: pText.isEmpty ? null : Money.fromPkr(_parsePkr(pText)),
+        sellingPrice: sText.isEmpty ? null : Money.fromPkr(_parsePkr(sText)),
+      );
+    }
+
     Navigator.of(context).pop(MedicineCreationResult(
       medicine: medicine,
-      openingStock: null,
+      openingStock: openingStock,
     ));
   }
 
@@ -322,7 +375,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // ✅ Category Hybrid Selector
+                            // Category Hybrid Selector
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -364,7 +417,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                               ),
                             ),
                             const SizedBox(width: AppSpacing.md),
-                            // ✅ Manufacturer Hybrid Selector
+                            // Manufacturer Hybrid Selector
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -445,7 +498,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                               child: DropdownButtonFormField<String>(
                                 value: _unit,
                                 decoration: _decoration('Unit'),
-                                items: _units
+                                items: _unitOptions
                                     .map((u) => DropdownMenuItem(value: u, child: Text(u)))
                                     .toList(),
                                 onChanged: (v) => setState(() => _unit = v!),
@@ -552,6 +605,12 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                           ],
                         ),
                       ]),
+
+                      // Optional opening batch (new medicines only)
+                      if (!_isEditing) ...[
+                        const SizedBox(height: AppSpacing.lg),
+                        _buildBatchSection(),
+                      ],
                       const SizedBox(height: AppSpacing.md),
                     ],
                   ),
@@ -583,6 +642,110 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildBatchSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _buildSectionHeader(
+                'Opening Batch (Optional)',
+                Icons.layers_rounded,
+                AppColors.info,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Text('Add batch now', style: AppTypography.caption),
+            Switch(
+              value: _addBatch,
+              activeColor: AppColors.primary,
+              onChanged: (v) => setState(() => _addBatch = v),
+            ),
+          ],
+        ),
+        if (_addBatch) ...[
+          const SizedBox(height: AppSpacing.sm),
+          _buildSectionCard([
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _batchNoCtrl,
+                    decoration: _decoration('Batch Number *', hint: 'e.g. BN-2026-0892'),
+                    validator: (v) {
+                      final t = v?.trim() ?? '';
+                      if (t.isEmpty) return 'Required';
+                      if (t.length > 40) return 'Max 40 characters';
+                      return null;
+                    },
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: InkWell(
+                    onTap: _pickBatchExpiry,
+                    child: InputDecorator(
+                      decoration: _decoration('Expiry Date *'),
+                      child: Text(
+                        '${_batchExpiry.day.toString().padLeft(2, '0')}/'
+                            '${_batchExpiry.month.toString().padLeft(2, '0')}/'
+                            '${_batchExpiry.year}',
+                        style: AppTypography.body,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: TextFormField(
+                    controller: _batchQtyCtrl,
+                    decoration: _decoration('Quantity *', hint: 'e.g. 100'),
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      final n = int.tryParse((v ?? '').trim());
+                      if (n == null || n <= 0) return 'Enter quantity > 0';
+                      return null;
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              children: [
+                Expanded(
+                  child: _priceField(
+                    'Batch Purchase Price (PKR)',
+                    _batchPurchaseCtrl,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: _priceField(
+                    'Batch Selling Price (PKR)',
+                    _batchSellingCtrl,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                const Expanded(child: SizedBox()),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Leave batch prices empty to use the medicine\'s purchase and selling price.',
+                style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+              ),
+            ),
+          ]),
+        ],
+      ],
     );
   }
 
