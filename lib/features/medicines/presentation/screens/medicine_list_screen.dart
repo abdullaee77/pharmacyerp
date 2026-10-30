@@ -411,6 +411,16 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
             ],
           ),
         ),
+        DataCell(
+          Text(
+            m.formula.isEmpty ? '—' : m.formula,
+            style: AppTypography.tableCell.copyWith(
+              color: m.formula.isEmpty ? AppColors.textSecondary : AppColors.info,
+              fontStyle: m.formula.isEmpty ? FontStyle.italic : FontStyle.normal,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
         DataCell(Text(m.category.isEmpty ? '—' : m.category, style: AppTypography.tableCell)),
         DataCell(Text(m.manufacturer.isEmpty ? '—' : m.manufacturer, style: AppTypography.tableCell)),
         DataCell(Text(m.sellingPrice.display, style: AppTypography.numeric)),
@@ -467,6 +477,17 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
               if (m.genericName.isNotEmpty)
                 Text(m.genericName, style: AppTypography.caption),
             ],
+          ),
+        ),
+        // Formula — read-only in bulk edit (use single edit dialog to change)
+        DataCell(
+          Text(
+            m.formula.isEmpty ? '—' : m.formula,
+            style: AppTypography.tableCell.copyWith(
+              color: m.formula.isEmpty ? AppColors.textSecondary : AppColors.info,
+              fontStyle: m.formula.isEmpty ? FontStyle.italic : FontStyle.normal,
+            ),
+            overflow: TextOverflow.ellipsis,
           ),
         ),
         // Category
@@ -538,6 +559,7 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
           final matchesQuery = ctrl.filter.isEmpty ||
               m.name.toLowerCase().contains(ctrl.filter.toLowerCase()) ||
               m.genericName.toLowerCase().contains(ctrl.filter.toLowerCase()) ||
+              m.formula.toLowerCase().contains(ctrl.filter.toLowerCase()) ||
               m.manufacturer.toLowerCase().contains(ctrl.filter.toLowerCase());
 
           final matchesCategory =
@@ -611,6 +633,7 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
                     },
                     columns: const [
                       DataColumn(label: Text('Medicine Name')),
+                      DataColumn(label: Text('Formula')),
                       DataColumn(label: Text('Category')),
                       DataColumn(label: Text('Company')),
                       DataColumn(

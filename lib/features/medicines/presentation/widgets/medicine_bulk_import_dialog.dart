@@ -51,6 +51,7 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
   static const _headers = [
     'name',
     'generic_name',
+    'formula',
     'manufacturer',
     'dosage_form',
     'strength',
@@ -71,6 +72,7 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
     [
       'Panadol',
       'Paracetamol',
+      'Paracetamol 500mg',
       'GSK',
       'Tablet',
       '500mg',
@@ -88,6 +90,7 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
     [
       'Augmentin',
       'Amoxicillin + Clavulanic Acid',
+      'Amoxicillin 500mg + Clavulanic Acid 125mg',
       'GSK',
       'Tablet',
       '625mg',
@@ -105,6 +108,8 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
     [
       'Disprin',
       'Aspirin',
+      'Aspirin 300mg',                        // ← ADD THIS
+
       'Reckitt',
       'Tablet',
       '300mg',
@@ -124,6 +129,7 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
   static const List<double> _columnWidths = [
     150, // name
     170, // generic_name
+    170, // formula
     130, // manufacturer
     100, // dosage_form
     90, // strength
@@ -430,6 +436,7 @@ class _MedicineBulkImportDialogState extends State<MedicineBulkImportDialog> {
       id: MedicineId.generate(),
       name: name,
       genericName: row['generic_name'] ?? '',
+      formula: row['formula'] ?? '',          // ← ADD THIS
       manufacturer: row['manufacturer'] ?? '',
       dosageForm: _parseDosage(row['dosage_form']),
       strength: row['strength'] ?? '',

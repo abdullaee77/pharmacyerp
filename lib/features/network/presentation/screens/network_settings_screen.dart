@@ -331,7 +331,10 @@ class _NetworkSettingsScreenState extends State<NetworkSettingsScreen> {
             ],
           ),
           const SizedBox(height: AppSpacing.lg),
-          child,
+          Material(
+            color: Colors.transparent,
+            child: child,
+          ),
         ],
       ),
     );

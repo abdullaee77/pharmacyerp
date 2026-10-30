@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:shelf/shelf.dart';
@@ -406,7 +407,27 @@ class ApiServer {
         }
 
         final stored = row?['password_hash'] as String? ?? '';
-        final valid = row != null && _constantTimeEquals(stored, hash);
+        final storedMatches =
+            row != null && _constantTimeEquals(stored, hash);
+
+        // Legacy repair: users created before the double-hash fix have
+        // sha256(sha256(password)) stored. Accept once and fix in place.
+        var legacyMatch = false;
+        if (!storedMatches && row != null) {
+          final legacy = sha256.convert(utf8.encode(hash)).toString();
+          if (_constantTimeEquals(stored, legacy)) {
+            legacyMatch = true;
+            await db.update(
+              'users',
+              {'password_hash': hash},
+              where: 'id = ?',
+              whereArgs: [row['id']],
+            );
+            print('[Login] Repaired legacy password hash for "$username".');
+          }
+        }
+
+        final valid = row != null && (storedMatches || legacyMatch);
 
         if (!valid) {
           if (row != null) {

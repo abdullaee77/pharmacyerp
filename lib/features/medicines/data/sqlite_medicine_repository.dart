@@ -25,10 +25,10 @@ class SqliteMedicineRepository implements MedicineRepository {
 
       if (filter.searchQuery != null && filter.searchQuery!.isNotEmpty) {
         whereClauses.add(
-          '(name LIKE ? OR generic_name LIKE ? OR barcode LIKE ? OR manufacturer LIKE ?)',
+          '(name LIKE ? OR generic_name LIKE ? OR formula LIKE ? OR barcode LIKE ? OR manufacturer LIKE ?)',
         );
         final q = '%${filter.searchQuery}%';
-        whereArgs.addAll([q, q, q, q]);
+        whereArgs.addAll([q, q, q, q, q]);
       }
       if (filter.category != null && filter.category!.isNotEmpty) {
         whereClauses.add('category = ?');

@@ -6,6 +6,7 @@ class MedicineModel {
   final String id;
   final String name;
   final String genericName;
+  final String formula;
   final String manufacturer;
   final String dosageForm;
   final String strength;
@@ -30,6 +31,7 @@ class MedicineModel {
     required this.id,
     required this.name,
     required this.genericName,
+    required this.formula,
     required this.manufacturer,
     required this.dosageForm,
     required this.strength,
@@ -56,6 +58,7 @@ class MedicineModel {
       id: map['id'] as String,
       name: map['name'] as String,
       genericName: (map['generic_name'] as String?) ?? '',
+      formula: (map['formula'] as String?) ?? '',   // ← ADD THIS
       manufacturer: (map['manufacturer'] as String?) ?? '',
       dosageForm: (map['dosage_form'] as String?) ?? 'tablet',
       strength: (map['strength'] as String?) ?? '',
@@ -83,6 +86,7 @@ class MedicineModel {
       'id': id,
       'name': name,
       'generic_name': genericName,
+      'formula': formula,
       'manufacturer': manufacturer,
       'dosage_form': dosageForm,
       'strength': strength,
@@ -110,6 +114,7 @@ class MedicineModel {
       id: MedicineId(id),
       name: name,
       genericName: genericName,
+      formula: formula,
       manufacturer: manufacturer,
       dosageForm: _parseDosageForm(dosageForm),
       strength: strength,
@@ -139,6 +144,7 @@ class MedicineModel {
       id: m.id.value,
       name: m.name,
       genericName: m.genericName,
+      formula: m.formula,
       manufacturer: m.manufacturer,
       dosageForm: m.dosageForm.name,
       strength: m.strength,

@@ -58,6 +58,7 @@ class _BatchBulkImportDialogState extends State<BatchBulkImportDialog> {
   static const _headers = [
     'medicine_name',
     'strength',
+    'formula',           // ← ADD THIS
     'batch_number',
     'expiry_date',
     'quantity',
@@ -68,6 +69,7 @@ class _BatchBulkImportDialogState extends State<BatchBulkImportDialog> {
   static const List<double> _columnWidths = [
     190, // medicine_name
     100, // strength
+    160, // formula          // ← ADD THIS
     150, // batch_number
     120, // expiry_date
     90, // quantity
@@ -325,8 +327,8 @@ class _BatchBulkImportDialogState extends State<BatchBulkImportDialog> {
 
     if (meds.isEmpty) {
       table.addAll([
-        ['Panadol', '500mg', 'BN-001', '31/12/${now.year + 2}', '100', '2.50', '4.00'],
-        ['Augmentin', '625mg', 'BN-002', '30/06/${now.year + 2}', '50', '25.00', '35.00'],
+        ['Panadol', '500mg', 'Paracetamol 500mg', 'BN-001', '31/12/${now.year + 2}', '100', '2.50', '4.00'],
+        ['Augmentin', '625mg', 'Amoxicillin 500mg + Clavulanic Acid 125mg', 'BN-002', '30/06/${now.year + 2}', '50', '25.00', '35.00'],
       ]);
       return table;
     }
@@ -336,6 +338,7 @@ class _BatchBulkImportDialogState extends State<BatchBulkImportDialog> {
       table.add([
         m.name,
         m.strength,
+        m.formula,     // ← ADD THIS
         'BN-${now.year}-00${i + 1}',
         '31/12/${now.year + 2}',
         '100',

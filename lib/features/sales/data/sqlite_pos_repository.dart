@@ -45,13 +45,13 @@ class SqlitePosRepository implements PosRepository {
           ) AS fefo_selling_price
         FROM medicines m
         LEFT JOIN inventory_stocks s ON m.id = s.medicine_id
-        WHERE (m.name LIKE ? OR m.generic_name LIKE ? OR m.barcode LIKE ? OR m.manufacturer LIKE ?)
+          WHERE (m.name LIKE ? OR m.generic_name LIKE ? OR m.formula LIKE ? OR m.barcode LIKE ? OR m.manufacturer LIKE ?)
           AND m.status = 'active'
         ORDER BY m.name ASC
         LIMIT ?
       ''';
 
-      final rows = await db.rawQuery(sqlQuery, [q, q, q, q, limit]);
+      final rows = await db.rawQuery(sqlQuery, [q, q, q, q, q, limit]);
 
       final results = rows.map((r) {
         final medicine = MedicineModel.fromMap(r).toDomain();

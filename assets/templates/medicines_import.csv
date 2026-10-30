@@ -1,101 +1,11 @@
-name,generic_name,manufacturer,dosage_form,strength,category,unit,rack_location,purchase_price,selling_price,mrp,box_size,min_stock,barcode,prescription_required
-Amlodipine,Amlodipine Besylate,Getz Pharma,Tablet,5 mg,Cardiovascular,Tablet,A-05,40,52,52,30,10,8964000123476,TRUE
-Amlodipine,Amlodipine Besylate,Getz Pharma,Tablet,10 mg,Cardiovascular,Tablet,A-05,70,88,88,30,10,8964000123477,TRUE
-Atorvastatin,Atorvastatin Calcium,Searle,Tablet,10 mg,Cardiovascular,Tablet,A-06,110,135,135,30,10,8964000123478,TRUE
-Atorvastatin,Atorvastatin Calcium,Searle,Tablet,20 mg,Cardiovascular,Tablet,A-06,180,220,220,30,10,8964000123479,TRUE
-Rosuvastatin,Rosuvastatin Calcium,Getz Pharma,Tablet,10 mg,Cardiovascular,Tablet,A-07,190,230,230,30,5,8964000123480,TRUE
-Rosuvastatin,Rosuvastatin Calcium,Getz Pharma,Tablet,20 mg,Cardiovascular,Tablet,A-07,320,380,380,30,5,8964000123481,TRUE
-Losartan,Losartan Potassium,Ferozsons,Tablet,50 mg,Cardiovascular,Tablet,A-08,130,160,160,30,10,8964000123482,TRUE
-Losartan,Losartan Potassium,Ferozsons,Tablet,100 mg,Cardiovascular,Tablet,A-08,220,265,265,30,5,8964000123483,TRUE
-Valsartan,Valsartan,Novartis,Tablet,80 mg,Cardiovascular,Tablet,A-09,280,340,340,28,5,8964000123484,TRUE
-Valsartan,Valsartan,Novartis,Tablet,160 mg,Cardiovascular,Tablet,A-09,480,570,570,28,5,8964000123485,TRUE
-Bisoprolol,Bisoprolol Fumarate,Merck,Tablet,5 mg,Cardiovascular,Tablet,A-10,140,170,170,30,10,8964000123486,TRUE
-Bisoprolol,Bisoprolol Fumarate,Merck,Tablet,2.5 mg,Cardiovascular,Tablet,A-10,95,120,120,30,10,8964000123487,TRUE
-Carvedilol,Carvedilol,GSK,Tablet,6.25 mg,Cardiovascular,Tablet,A-11,80,100,100,30,5,8964000123488,TRUE
-Carvedilol,Carvedilol,GSK,Tablet,12.5 mg,Cardiovascular,Tablet,A-11,130,160,160,30,5,8964000123489,TRUE
-Captopril,Captopril,Sami Pharma,Tablet,25 mg,Cardiovascular,Tablet,A-12,60,75,75,20,5,8964000123490,TRUE
-Enalapril,Enalapril Maleate,AGP,Tablet,10 mg,Cardiovascular,Tablet,A-13,85,105,105,30,5,8964000123491,TRUE
-Glibenclamide,Glibenclamide,Sanofi,Tablet,5 mg,Antidiabetic,Tablet,C-05,50,65,65,50,10,8964000123492,TRUE
-Glimepiride,Glimepiride,Getz Pharma,Tablet,1 mg,Antidiabetic,Tablet,C-06,90,115,115,30,10,8964000123493,TRUE
-Glimepiride,Glimepiride,Getz Pharma,Tablet,2 mg,Antidiabetic,Tablet,C-06,150,185,185,30,10,8964000123494,TRUE
-Glimepiride,Glimepiride,Getz Pharma,Tablet,4 mg,Antidiabetic,Tablet,C-06,240,290,290,30,5,8964000123495,TRUE
-Sitagliptin,Sitagliptin Phosphate,MSD,Tablet,50 mg,Antidiabetic,Tablet,C-07,380,450,450,14,5,8964000123496,TRUE
-Sitagliptin,Sitagliptin Phosphate,MSD,Tablet,100 mg,Antidiabetic,Tablet,C-07,650,760,760,14,5,8964000123497,TRUE
-Vildagliptin,Vildagliptin,Novartis,Tablet,50 mg,Antidiabetic,Tablet,C-08,410,490,490,28,5,8964000123498,TRUE
-Empagliflozin,Empagliflozin,Boehringer Ingelheim,Tablet,10 mg,Antidiabetic,Tablet,C-09,520,620,620,30,5,8964000123499,TRUE
-Empagliflozin,Empagliflozin,Boehringer Ingelheim,Tablet,25 mg,Antidiabetic,Tablet,C-09,880,1020,1020,30,3,8964000123500,TRUE
-Pioglitazone,Pioglitazone,Sami Pharma,Tablet,15 mg,Antidiabetic,Tablet,C-10,110,135,135,14,5,8964000123501,TRUE
-Gliclazide,Gliclazide,Servier,Tablet,80 mg,Antidiabetic,Tablet,C-11,210,250,250,60,10,8964000123502,TRUE
-Insulin NPH,Isophane Insulin,Novo Nordisk,Injection,100 IU/ml,Antidiabetic,Vial,G-02,950,1120,1120,1,2,8964000123503,TRUE
-Insulin Regular,Soluble Human Insulin,Novo Nordisk,Injection,100 IU/ml,Antidiabetic,Vial,G-02,920,1080,1080,1,2,8964000123504,TRUE
-Ciprofloxacin,Ciprofloxacin,Bayer,Tablet,500 mg,Antibiotic,Tablet,B-04,180,215,215,10,5,8964000123505,TRUE
-Ciprofloxacin,Ciprofloxacin,Bayer,Tablet,250 mg,Antibiotic,Tablet,B-04,100,125,125,10,5,8964000123506,TRUE
-Levofloxacin,Levofloxacin,Getz Pharma,Tablet,500 mg,Antibiotic,Tablet,B-05,210,250,250,10,5,8964000123507,TRUE
-Moxifloxacin,Moxifloxacin,Bayer,Tablet,400 mg,Antibiotic,Tablet,B-06,450,530,530,5,3,8964000123508,TRUE
-Cefixime,Cefixime,Sami Pharma,Capsule,400 mg,Antibiotic,Capsule,B-07,310,365,365,10,5,8964000123509,TRUE
-Cefixime,Cefixime,Sami Pharma,Suspension,100 mg/5ml,Antibiotic,Bottle,B-07,220,260,260,1,5,8964000123510,TRUE
-Cephradine,Cephradine,GSK,Capsule,500 mg,Antibiotic,Capsule,B-08,190,225,225,12,5,8964000123511,TRUE
-Cefuroxime,Cefuroxime Axetil,AGP,Tablet,500 mg,Antibiotic,Tablet,B-09,480,560,560,10,5,8964000123512,TRUE
-Cefaclor,Cefaclor,Lilly,Capsule,250 mg,Antibiotic,Capsule,B-10,290,340,340,12,3,8964000123513,TRUE
-Clarithromycin,Clarithromycin,Abbott,Tablet,500 mg,Antibiotic,Tablet,B-11,520,610,610,10,5,8964000123514,TRUE
-Doxycycline,Doxycycline Hyclate,Bosch Pharma,Capsule,100 mg,Antibiotic,Capsule,B-12,70,90,90,10,10,8964000123515,TRUE
-Metronidazole,Metronidazole,Sanofi,Tablet,400 mg,Antibiotic,Tablet,B-13,45,60,60,100,20,8964000123516,TRUE
-Co-Trimoxazole,Sulfamethoxazole + Trimethoprim,GSK,Tablet,480 mg,Antibiotic,Tablet,B-14,50,65,65,100,10,8964000123517,TRUE
-Esomeprazole,Esomeprazole,Getz Pharma,Capsule,20 mg,Gastrointestinal,Capsule,B-15,130,155,155,14,10,8964000123518,FALSE
-Esomeprazole,Esomeprazole,Getz Pharma,Capsule,40 mg,Gastrointestinal,Capsule,B-15,210,250,250,14,10,8964000123519,FALSE
-Lansoprazole,Lansoprazole,AGP,Capsule,30 mg,Gastrointestinal,Capsule,B-16,160,195,195,14,5,8964000123520,FALSE
-Famotidine,Famotidine,Searle,Tablet,20 mg,Gastrointestinal,Tablet,B-17,55,70,70,20,5,8964000123521,FALSE
-Ranitidine,Ranitidine HCl,GSK,Tablet,150 mg,Gastrointestinal,Tablet,B-18,40,50,50,30,5,8964000123522,FALSE
-Domperidone,Domperidone,Janssen,Tablet,10 mg,Gastrointestinal,Tablet,B-19,65,80,80,50,10,8964000123523,FALSE
-Metoclopramide,Metoclopramide,Sanofi,Tablet,10 mg,Gastrointestinal,Tablet,B-20,30,40,40,100,10,8964000123524,FALSE
-Ondansetron,Ondansetron,GSK,Tablet,8 mg,Gastrointestinal,Tablet,B-21,180,215,215,10,5,8964000123525,TRUE
-Hyoscine Butylbromide,Hyoscine Butylbromide,Sanofi,Tablet,10 mg,Gastrointestinal,Tablet,B-22,75,95,95,100,15,8964000123526,FALSE
-Mebeverine,Mebeverine HCl,Abbott,Tablet,135 mg,Gastrointestinal,Tablet,B-23,190,225,225,30,5,8964000123527,FALSE
-Loperamide,Loperamide,Janssen,Capsule,2 mg,Gastrointestinal,Capsule,B-24,35,45,45,20,10,8964000123528,FALSE
-Spironolactone,Spironolactone,Searle,Tablet,25 mg,Cardiovascular,Tablet,A-14,80,100,100,30,5,8964000123529,TRUE
-Furosemide,Furosemide,Sanofi,Tablet,40 mg,Cardiovascular,Tablet,A-15,30,40,40,100,20,8964000123530,TRUE
-Hydrochlorothiazide,Hydrochlorothiazide,AGP,Tablet,25 mg,Cardiovascular,Tablet,A-16,45,60,60,50,10,8964000123531,TRUE
-Aceclofenac,Aceclofenac,Sami Pharma,Tablet,100 mg,NSAID,Tablet,A-17,90,110,110,20,10,8964000123532,FALSE
-Mefenamic Acid,Mefenamic Acid,Pfizer,Tablet,500 mg,NSAID,Tablet,A-18,65,80,80,100,20,8964000123533,FALSE
-Naproxen,Naproxen Sodium,Atco,Tablet,500 mg,NSAID,Tablet,A-19,120,145,145,20,10,8964000123534,FALSE
-Meloxicam,Meloxicam,Getz Pharma,Tablet,15 mg,NSAID,Tablet,A-20,110,135,135,10,5,8964000123535,FALSE
-Celecoxib,Celecoxib,Pfizer,Capsule,200 mg,NSAID,Capsule,A-21,280,335,335,20,5,8964000123536,TRUE
-Tramadol,Tramadol HCl,Searle,Capsule,50 mg,Analgesic,Capsule,A-22,85,105,105,30,5,8964000123537,TRUE
-Paracetamol Syrup,Paracetamol,GSK,Syrup,120 mg/5ml,Analgesic,Bottle,A-23,70,85,85,1,10,8964000123538,FALSE
-Ketorolac,Ketorolac Tromethamine,Hilton,Tablet,10 mg,NSAID,Tablet,A-24,140,170,170,20,5,8964000123539,TRUE
-Montelukast,Montelukast Sodium,Getz Pharma,Tablet,10 mg,Respiratory,Tablet,E-05,220,260,260,14,5,8964000123540,FALSE
-Montelukast,Montelukast Sodium,Getz Pharma,Tablet,5 mg,Respiratory,Tablet,E-05,170,200,200,14,5,8964000123541,FALSE
-Budesonide Inhaler,Budesonide,AstraZeneca,Inhaler,200 mcg/dose,Respiratory,Inhaler,E-06,420,490,490,1,2,8964000123542,TRUE
-Fluticasone Furoate,Fluticasone Furoate,GSK,Nasal Spray,27.5 mcg/dose,Respiratory,Bottle,E-07,680,790,790,1,2,8964000123543,TRUE
-Ipratropium Bromide,Ipratropium Bromide,Boehringer Ingelheim,Inhaler,20 mcg/dose,Respiratory,Inhaler,E-08,310,365,365,1,2,8964000123544,TRUE
-Theophylline,Theophylline,Barrett Hodgson,Tablet,125 mg,Respiratory,Tablet,E-09,50,65,65,50,10,8964000123545,TRUE
-Fexofenadine,Fexofenadine HCl,Sanofi,Tablet,120 mg,Antihistamine,Tablet,A-25,180,215,215,10,5,8964000123546,FALSE
-Fexofenadine,Fexofenadine HCl,Sanofi,Tablet,180 mg,Antihistamine,Tablet,A-25,240,285,285,10,5,8964000123547,FALSE
-Levocetirizine,Levocetirizine Dihydrochloride,AGP,Tablet,5 mg,Antihistamine,Tablet,A-26,80,100,100,30,5,8964000123548,FALSE
-Desloratadine,Desloratadine,Organon,Tablet,5 mg,Antihistamine,Tablet,A-27,110,135,135,10,5,8964000123549,FALSE
-Chlorpheniramine,Chlorpheniramine Maleate,Sami Pharma,Tablet,4 mg,Antihistamine,Tablet,A-28,20,30,30,1000,50,8964000123550,FALSE
-Fluconazole,Fluconazole,Pfizer,Capsule,150 mg,Antifungal,Capsule,D-02,120,145,145,1,5,8964000123551,FALSE
-Itraconazole,Itraconazole,Barrett Hodgson,Capsule,100 mg,Antifungal,Capsule,D-03,340,400,400,4,3,8964000123552,TRUE
-Terbinafine,Terbinafine HCl,Novartis,Tablet,250 mg,Antifungal,Tablet,D-04,450,530,530,10,3,8964000123553,TRUE
-Clotrimazole Cream,Clotrimazole,Bayer,Cream,1%,Antifungal,Tube,D-05,80,100,100,1,5,8964000123554,FALSE
-Ketoconazole Shampoo,Ketoconazole,Janssen,Shampoo,2%,Antifungal,Bottle,D-06,290,345,345,1,3,8964000123555,FALSE
-Acyclovir,Acyclovir,GSK,Tablet,200 mg,Antiviral,Tablet,D-07,160,190,190,25,3,8964000123556,TRUE
-Acyclovir Ointment,Acyclovir,GSK,Ointment,5%,Antiviral,Tube,D-07,110,135,135,1,3,8964000123557,FALSE
-Diazepam,Diazepam,Roche,Tablet,5 mg,Central Nervous System,Tablet,H-01,40,50,50,30,10,8964000123558,TRUE
-Alprazolam,Alprazolam,Pfizer,Tablet,0.5 mg,Central Nervous System,Tablet,H-02,60,75,75,30,10,8964000123559,TRUE
-Clonazepam,Clonazepam,Roche,Tablet,0.5 mg,Central Nervous System,Tablet,H-03,70,85,85,30,10,8964000123560,TRUE
-Escitalopram,Escitalopram,Lundbeck,Tablet,10 mg,Central Nervous System,Tablet,H-04,210,250,250,14,5,8964000123561,TRUE
-Sertraline,Sertraline,Pfizer,Tablet,50 mg,Central Nervous System,Tablet,H-05,280,330,330,28,5,8964000123562,TRUE
-Fluoxetine,Fluoxetine,Lilly,Capsule,20 mg,Central Nervous System,Tablet,H-06,140,165,165,14,5,8964000123563,TRUE
-Pregabalin,Pregabalin,Pfizer,Capsule,75 mg,Central Nervous System,Capsule,H-07,320,375,375,14,5,8964000123564,TRUE
-Gabapentin,Gabapentin,Getz Pharma,Capsule,300 mg,Central Nervous System,Capsule,H-08,240,285,285,10,5,8964000123565,TRUE
-Levetiracetam,Levetiracetam,UCB,Tablet,500 mg,Central Nervous System,Tablet,H-09,550,640,640,30,3,8964000123566,TRUE
-Sodium Valproate,Sodium Valproate,Sanofi,Tablet,500 mg,Central Nervous System,Tablet,H-10,310,365,365,100,5,8964000123567,TRUE
-Carbamazepine,Carbamazepine,Novartis,Tablet,200 mg,Central Nervous System,Tablet,H-11,120,145,145,50,10,8964000123568,TRUE
-Calcium Carbonate,Calcium Carbonate + Vitamin D3,GlaxoSmithKline,Tablet,500 mg / 200 IU,Supplement,Tablet,C-12,110,135,135,30,10,8964000123569,FALSE
-Ferrous Sulfate,Ferrous Sulfate,Sami Pharma,Tablet,200 mg,Supplement,Tablet,C-13,40,55,55,30,10,8964000123570,FALSE
-Folic Acid,Folic Acid,AGP,Tablet,5 mg,Supplement,Tablet,C-14,30,40,40,100,20,8964000123571,FALSE
-Vitamin B-Complex,B-Complex Blend,Searle,Tablet,Standard,Vitamin,Tablet,C-15,85,105,105,30,10,8964000123572,FALSE
-Vitamin D3 Softgel,Cholecalciferol,Nutrifactor,Capsule,20000 IU,Vitamin,Capsule,C-16,180,215,215,4,5,8964000123573,FALSE
-Alpha Lipoic Acid,Alpha Lipoic Acid,Hilton,Capsule,300 mg,Supplement,Capsule,C-17,350,410,410,30,3,8964000123574,FALSE
-L-Methylfolate,L-Methylfolate,Getz Pharma,Tablet,7.5 mg,Supplement,Tablet,C-18,290,340,340,30,5,8964000123575,FALSE
+name,generic_name,formula,manufacturer,dosage_form,strength,category,unit,rack_location,purchase_price,selling_price,mrp,box_size,min_stock,barcode,prescription_required
+Amlodipine,Amlodipine Besylate,Amlodipine Besylate 5mg,Getz Pharma,Tablet,5 mg,Cardiovascular,Tablet,A-05,40,52,52,30,10,8964000123476,TRUE
+Atorvastatin,Atorvastatin Calcium,Atorvastatin Calcium 10mg,Searle,Tablet,10 mg,Cardiovascular,Tablet,A-06,110,135,135,30,10,8964000123478,TRUE
+Glimepiride,Glimepiride,Glimepiride 2mg,Getz Pharma,Tablet,2 mg,Antidiabetic,Tablet,C-06,150,185,185,30,10,8964000123494,TRUE
+Ciprofloxacin,Ciprofloxacin,Ciprofloxacin 500mg,Bayer,Tablet,500 mg,Antibiotic,Tablet,B-04,180,215,215,10,5,8964000123505,TRUE
+Cefixime,Cefixime,Cefixime Trihydrate 400mg,Sami Pharma,Capsule,400 mg,Antibiotic,Capsule,B-07,310,365,365,10,5,8964000123509,TRUE
+Esomeprazole,Esomeprazole,Esomeprazole Magnesium 20mg,Getz Pharma,Capsule,20 mg,Gastrointestinal,Capsule,B-15,130,155,155,14,10,8964000123518,FALSE
+Celecoxib,Celecoxib,Celecoxib 200mg,Pfizer,Capsule,200 mg,NSAID,Capsule,A-21,280,335,335,20,5,8964000123536,TRUE
+Montelukast,Montelukast Sodium,Montelukast Sodium 10mg,Getz Pharma,Tablet,10 mg,Respiratory,Tablet,E-05,220,260,260,14,5,8964000123540,FALSE
+Fexofenadine,Fexofenadine HCl,Fexofenadine Hydrochloride 120mg,Sanofi,Tablet,120 mg,Antihistamine,Tablet,A-25,180,215,215,10,5,8964000123546,FALSE
+Escitalopram,Escitalopram,Escitalopram Oxalate 10mg,Lundbeck,Tablet,10 mg,Central Nervous System,Tablet,H-04,210,250,250,14,5,8964000123561,TRUE

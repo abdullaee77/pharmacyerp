@@ -552,6 +552,16 @@ class _QuantityPromptDialogState extends State<_QuantityPromptDialog> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
+                      if (widget.medicine.formula.isNotEmpty)
+                        Text(
+                          'Formula: ${widget.medicine.formula}',
+                          style: AppTypography.caption.copyWith(
+                            color: AppColors.info,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       Text(
                         'Stock: ${widget.totalAvailable} units across ${widget.batchCount} FEFO batch(es)',
                         style: AppTypography.caption.copyWith(color: AppColors.textSecondary),

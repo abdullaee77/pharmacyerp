@@ -184,6 +184,7 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
             columns: const [
               DataColumn(label: Text('Medicine Product')),
               DataColumn(label: Text('Generic Name')),
+              DataColumn(label: Text('Formula')),
               DataColumn(label: Text('Current Stock'), numeric: true),
               DataColumn(label: Text('Min Limit'), numeric: true),
               DataColumn(label: Text('Unit Price'), numeric: true),
@@ -225,6 +226,20 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                   ),
                   DataCell(Text(s.medicine.genericName,
                       style: AppTypography.tableCell)),
+                  DataCell(
+                    Text(
+                      s.medicine.formula.isEmpty ? '—' : s.medicine.formula,
+                      style: AppTypography.tableCell.copyWith(
+                        color: s.medicine.formula.isEmpty
+                            ? AppColors.textSecondary
+                            : AppColors.info,
+                        fontStyle: s.medicine.formula.isEmpty
+                            ? FontStyle.italic
+                            : FontStyle.normal,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                   DataCell(Text('${s.currentStock.value}',
                       style: AppTypography.numeric)),
                   DataCell(Text('${s.medicine.minStockLevel.value}',

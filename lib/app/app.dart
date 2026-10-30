@@ -1,3 +1,4 @@
+//
 // import 'dart:io';
 // import 'package:flutter/material.dart';
 // import 'package:window_manager/window_manager.dart';
@@ -55,23 +56,40 @@
 //     _isClosing = true;
 //
 //     try {
+//       // 1. Hide the window immediately for a better user experience
 //       if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
 //         await windowManager.hide();
 //       }
+//
+//       // 2. Perform backups
 //       await DatabaseHelper.createBackup();
 //       debugPrint('[Auto-Backup] Close backup completed successfully.');
 //     } catch (e) {
 //       debugPrint('[Auto-Backup] Close backup error: $e');
 //     } finally {
+//       // 3. Stop background services
 //       try {
 //         _autoServer?.stop();
 //       } catch (_) {}
-//       exit(0);
+//
+//       // 4. CRITICAL: Safely close the database to flush WAL locks
+//       try {
+//         await DatabaseHelper.instance.close();
+//         debugPrint('[DB] Database closed cleanly.');
+//       } catch (e) {
+//         debugPrint('[DB] Close error: $e');
+//       }
+//
+//       // 5. Safely destroy the window process (Do NOT use exit(0))
+//       await windowManager.destroy();
 //     }
 //   }
 //
 //   @override
 //   void didChangeAppLifecycleState(AppLifecycleState state) {
+//     // Prevent reopening/backing up the DB while the window is closing
+//     if (_isClosing) return;
+//
 //     if (state == AppLifecycleState.paused ||
 //         state == AppLifecycleState.detached) {
 //       DatabaseHelper.createBackup();
@@ -255,23 +273,19 @@ class _PharmacyAppState extends State<PharmacyApp>
     _isClosing = true;
 
     try {
-      // 1. Hide the window immediately for a better user experience
       if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
         await windowManager.hide();
       }
 
-      // 2. Perform backups
       await DatabaseHelper.createBackup();
       debugPrint('[Auto-Backup] Close backup completed successfully.');
     } catch (e) {
       debugPrint('[Auto-Backup] Close backup error: $e');
     } finally {
-      // 3. Stop background services
       try {
         _autoServer?.stop();
       } catch (_) {}
 
-      // 4. CRITICAL: Safely close the database to flush WAL locks
       try {
         await DatabaseHelper.instance.close();
         debugPrint('[DB] Database closed cleanly.');
@@ -279,14 +293,12 @@ class _PharmacyAppState extends State<PharmacyApp>
         debugPrint('[DB] Close error: $e');
       }
 
-      // 5. Safely destroy the window process (Do NOT use exit(0))
       await windowManager.destroy();
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Prevent reopening/backing up the DB while the window is closing
     if (_isClosing) return;
 
     if (state == AppLifecycleState.paused ||
@@ -309,17 +321,7 @@ class _PharmacyAppState extends State<PharmacyApp>
         onFailure: (_) {},
       );
 
-      final isClient = NetworkConfig.instance.isClient;
-      final authRepo = isClient
-          ? HttpAuthRepository(
-        api: ApiClient.instance,
-        localFallback: SqliteAuthRepository(),
-      )
-          : SqliteAuthRepository();
-
-      _authController = AuthController(authRepository: authRepo);
-      ApiClient.instance.onSessionExpired =
-      isClient ? _handleSessionExpired : null;
+      _buildAuthController(); // ← CHANGED: extracted into separate method
 
       if (NetworkConfig.instance.isServer &&
           NetworkConfig.instance.autoStartServer) {
@@ -336,6 +338,32 @@ class _PharmacyAppState extends State<PharmacyApp>
         setState(() => _dbError = e.toString());
       }
     }
+  }
+
+  // ← NEW: Extracted so it can be called again after server connection
+  void _buildAuthController() {
+    final isClient = NetworkConfig.instance.isClient;
+    final authRepo = isClient
+        ? HttpAuthRepository(
+      api: ApiClient.instance,
+      localFallback: SqliteAuthRepository(),
+    )
+        : SqliteAuthRepository();
+
+    _authController = AuthController(authRepository: authRepo);
+    ApiClient.instance.onSessionExpired =
+    isClient ? _handleSessionExpired : null;
+  }
+
+  // ← NEW: Called by OnboardingScreen after user connects to server
+  void _reinitializeForClient() {
+    _buildAuthController();
+
+    if (NetworkConfig.instance.isClient) {
+      ApiClient.instance.startHeartbeat();
+    }
+
+    if (mounted) setState(() {});
   }
 
   void _handleSessionExpired() {
@@ -389,7 +417,6 @@ class _PharmacyAppState extends State<PharmacyApp>
       );
     }
 
-    // Always open to auth flow. License is enforced at login, not at startup.
     return MaterialApp(
       title: 'PharmaSuite ERP',
       debugShowCheckedModeBanner: false,
@@ -409,6 +436,7 @@ class _PharmacyAppState extends State<PharmacyApp>
             authController: _authController!,
             licenseController: _licenseController,
             onLoginSuccess: () {},
+            onServerConfigured: _reinitializeForClient, // ← NEW
           );
         },
       ),

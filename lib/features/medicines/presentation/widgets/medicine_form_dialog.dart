@@ -57,6 +57,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
   // Basic Info
   late final TextEditingController _nameCtrl;
   late final TextEditingController _genericCtrl;
+  late final TextEditingController _formulaCtrl;
   late final TextEditingController _strengthCtrl;
   late final TextEditingController _categoryCtrl;
   late final TextEditingController _manufacturerCtrl;
@@ -126,6 +127,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
 
     _nameCtrl = TextEditingController(text: m?.name ?? '');
     _genericCtrl = TextEditingController(text: m?.genericName ?? '');
+    _formulaCtrl = TextEditingController(text: m?.formula ?? '');
     _strengthCtrl = TextEditingController(text: m?.strength ?? '');
     _categoryCtrl = TextEditingController(text: initialCat);
     _manufacturerCtrl = TextEditingController(text: initialMfr);
@@ -201,6 +203,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
   void dispose() {
     _nameCtrl.dispose();
     _genericCtrl.dispose();
+    _formulaCtrl.dispose();
     _strengthCtrl.dispose();
     _categoryCtrl.dispose();
     _manufacturerCtrl.dispose();
@@ -262,6 +265,7 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
       id: m?.id ?? MedicineId.generate(),
       name: _nameCtrl.text.trim(),
       genericName: _genericCtrl.text.trim(),
+      formula: _formulaCtrl.text.trim(),    // ← ADD THIS
       manufacturer: _manufacturerCtrl.text.trim(),
       dosageForm: _dosageForm,
       strength: _strengthCtrl.text.trim(),
@@ -361,6 +365,8 @@ class _MedicineFormDialogState extends State<MedicineFormDialog> {
                       _buildSectionCard([
                         _field('Medicine Name *', _nameCtrl, required: true),
                         _field('Generic Name', _genericCtrl),
+                        _field('Formula / Composition', _formulaCtrl,
+                            hint: 'e.g. Paracetamol 500mg + Caffeine 65mg'),  // ← ADD THIS
                         Row(
                           children: [
                             Expanded(

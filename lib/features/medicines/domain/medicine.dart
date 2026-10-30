@@ -78,6 +78,7 @@ enum DrugSchedule {
 class Medicine extends Entity<MedicineId> {
   final String name;
   final String genericName;
+  final String formula;
   final String manufacturer;
   final DosageForm dosageForm;
   final String strength;
@@ -102,6 +103,7 @@ class Medicine extends Entity<MedicineId> {
     required super.id,
     required this.name,
     required this.genericName,
+    this.formula = '',
     required this.manufacturer,
     required this.dosageForm,
     required this.strength,
@@ -147,6 +149,7 @@ class Medicine extends Entity<MedicineId> {
   Medicine copyWith({
     String? name,
     String? genericName,
+    String? formula,
     String? manufacturer,
     DosageForm? dosageForm,
     String? strength,
@@ -170,6 +173,7 @@ class Medicine extends Entity<MedicineId> {
       id: id,
       name: name ?? this.name,
       genericName: genericName ?? this.genericName,
+      formula: formula ?? this.formula,
       manufacturer: manufacturer ?? this.manufacturer,
       dosageForm: dosageForm ?? this.dosageForm,
       strength: strength ?? this.strength,
